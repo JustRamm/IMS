@@ -298,7 +298,15 @@ export function useAssets(params = {}) {
         }
 
         const results = assets.map((a) => {
-          const isLive = a.status === "live" || Boolean(a.current_brand && a.status !== "available" && a.status !== "closed");
+          const liveBrand = liveMap[a.id];
+          const isVacant =
+            a.status === "available" ||
+            a.status === "closed" ||
+            (!liveBrand && (!a.current_brand || !a.current_brand.trim()));
+
+          const isLive = !isVacant && (a.status === "live" || Boolean(a.current_brand));
+          const vacantPhoto = getAssetVacantPhoto(a);
+
           let resolvedUrls = (a.photo_ids ?? []).map((id) => docUrlMap[id]).filter(Boolean);
           if (a.photo_url && !resolvedUrls.includes(a.photo_url)) {
             resolvedUrls.push(a.photo_url);
@@ -307,20 +315,30 @@ export function useAssets(params = {}) {
             resolvedUrls.push(a.proof_photo_url);
           }
 
-          // Live assets must NEVER use hardcoded placeholder images (/asset.png, /mallasset.png)
-          if (isLive) {
+          let finalUrls;
+          let finalPhotoUrl;
+
+          if (isVacant) {
+            // When an asset is freed / not associated with any brand, ALWAYS show the vacant photo
+            // (/asset.png for metro, /mallasset.png for mall) and never old brand/proof photos.
+            finalUrls = vacantPhoto ? [vacantPhoto] : [];
+            finalPhotoUrl = vacantPhoto || "";
+          } else {
+            // Live or active brand assets must NEVER use hardcoded placeholder images
             resolvedUrls = resolvedUrls.filter((u) => u !== "/asset.png" && u !== "/mallasset.png");
+            finalUrls = resolvedUrls.length > 0 ? resolvedUrls : [];
+            finalPhotoUrl = resolvedUrls[0] || "";
           }
 
-          const vacantPhoto = isLive ? null : getAssetVacantPhoto(a);
-          const finalUrls = resolvedUrls.length > 0 ? resolvedUrls : (vacantPhoto ? [vacantPhoto] : []);
           return {
             ...a,
+            status: isVacant && a.status !== "closed" ? "available" : a.status,
+            current_brand: isVacant ? null : (liveBrand ?? a.current_brand ?? null),
             queue_count: countMap[a.id] ?? a.queue_count ?? 0,
-            current_brand: liveMap[a.id] ?? a.current_brand ?? null,
-            photo_ids: a.photo_ids ?? [],
+            photo_ids: isVacant ? [] : (a.photo_ids ?? []),
             photo_urls: finalUrls,
-            photo_url: resolvedUrls[0] || (isLive ? "" : vacantPhoto) || "",
+            photo_url: finalPhotoUrl,
+            proof_photo_url: isVacant ? null : a.proof_photo_url,
             ...(gtpMap[a.id] ?? (a.next_gtp_date ? { next_gtp_date: a.next_gtp_date, gtp_overdue: false } : {})),
           };
         });
@@ -359,6 +377,17 @@ export function useAsset(id) {
 
       const docUrls = (asset.photo_ids ?? []).map((pId) => docsMap[pId]).filter(Boolean);
 
+      const activeCampaign = (campaigns ?? []).find((c) =>
+        ["onboarding", "invoicing", "live", "closing"].includes(c.stage),
+      );
+      const isVacant =
+        asset.status === "available" ||
+        asset.status === "closed" ||
+        (!activeCampaign && (!asset.current_brand || !asset.current_brand.trim()));
+
+      const isLive = !isVacant && (asset.status === "live" || Boolean(asset.current_brand));
+      const vacantPhoto = getAssetVacantPhoto(asset);
+
       let resolvedUrls = [...docUrls];
       if (asset.photo_url && !resolvedUrls.includes(asset.photo_url)) {
         resolvedUrls.push(asset.photo_url);
@@ -367,18 +396,25 @@ export function useAsset(id) {
         resolvedUrls.push(asset.proof_photo_url);
       }
 
-      const isLive = asset.status === "live" || Boolean(asset.current_brand && asset.status !== "available" && asset.status !== "closed");
-      if (isLive) {
-        resolvedUrls = resolvedUrls.filter((u) => u !== "/asset.png" && u !== "/mallasset.png");
-      }
+      let finalUrls;
+      let finalPhotoUrl;
 
-      const vacantPhoto = isLive ? null : getAssetVacantPhoto(asset);
-      const finalUrls = resolvedUrls.length > 0 ? resolvedUrls : (vacantPhoto ? [vacantPhoto] : []);
+      if (isVacant) {
+        finalUrls = vacantPhoto ? [vacantPhoto] : [];
+        finalPhotoUrl = vacantPhoto || "";
+      } else {
+        resolvedUrls = resolvedUrls.filter((u) => u !== "/asset.png" && u !== "/mallasset.png");
+        finalUrls = resolvedUrls.length > 0 ? resolvedUrls : [];
+        finalPhotoUrl = resolvedUrls[0] || "";
+      }
 
       return {
         ...asset,
+        status: isVacant && asset.status !== "closed" ? "available" : asset.status,
+        current_brand: isVacant ? null : (activeCampaign?.brand ?? asset.current_brand ?? null),
+        proof_photo_url: isVacant ? null : asset.proof_photo_url,
         photo_urls: finalUrls,
-        photo_url: resolvedUrls[0] || (isLive ? "" : vacantPhoto) || "",
+        photo_url: finalPhotoUrl,
         campaigns: campaigns ?? [],
         audit: audit ?? [],
         queue: queueEntries ?? [],

@@ -254,7 +254,16 @@ export default function Queue() {
             await supabase.from("queue_entries").update({ position: i + 1 }).eq("id", remaining[i].id);
           }
         } else {
-          await supabase.from("assets").update({ status: "available" }).eq("id", e.asset_id);
+          await supabase.from("assets").update({
+            status: "available",
+            current_brand: null,
+            proof_photo_url: null,
+            proof_photo_ids: [],
+            photo_url: null,
+            photo_ids: [],
+            start_date: null,
+            end_date: null,
+          }).eq("id", e.asset_id);
         }
       } else if (e?.state === "pending") {
         // Bug #4 fix: compact positions for remaining pending entries to remove gap
@@ -271,7 +280,16 @@ export default function Queue() {
           .from("queue_entries").select("*", { count: "exact", head: true })
           .eq("asset_id", e.asset_id).eq("state", "active");
         if (!activeCount && !(remaining ?? []).length) {
-          await supabase.from("assets").update({ status: "available" }).eq("id", e.asset_id);
+          await supabase.from("assets").update({
+            status: "available",
+            current_brand: null,
+            proof_photo_url: null,
+            proof_photo_ids: [],
+            photo_url: null,
+            photo_ids: [],
+            start_date: null,
+            end_date: null,
+          }).eq("id", e.asset_id);
         }
       }
       return { ok: true };

@@ -857,7 +857,11 @@ export default function AssetMap({ assets = [], onSelectAsset, selectedAssetId }
           <div className="flex gap-3 pt-2.5 mt-1 border-t border-border/50">
             <div className="w-20 shrink-0 overflow-hidden rounded-lg border border-border/60">
               <SmartImage
-                src={selectedAsset.photo_url || getAssetVacantPhoto(selectedAsset) || ""}
+                src={
+                  (!selectedAsset.current_brand || selectedAsset.status === "available" || selectedAsset.status === "closed")
+                    ? (getAssetVacantPhoto(selectedAsset) || selectedAsset.photo_url || "")
+                    : (selectedAsset.photo_url || getAssetVacantPhoto(selectedAsset) || "")
+                }
                 alt={selectedAsset.location_name}
                 preset="card"
                 aspectRatio="aspect-square"

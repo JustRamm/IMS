@@ -465,7 +465,20 @@ function QueuePanel({ asset }) {
           while (counted < holdDays) { d.setDate(d.getDate() + 1); const ds = d.toISOString().split("T")[0]; const dow = d.getDay(); if (dow !== 0 && dow !== 6 && !holidaySet.has(ds)) counted++; }
           await supabase.from("queue_entries").update({ state: "active", position: 0, expires_on: d.toISOString().split("T")[0] }).eq("id", next.id);
         } else {
-          await supabase.from("assets").update({ status: "available" }).eq("id", entry.asset_id).eq("status", "reserved");
+          await supabase
+            .from("assets")
+            .update({
+              status: "available",
+              current_brand: null,
+              proof_photo_url: null,
+              proof_photo_ids: [],
+              photo_url: null,
+              photo_ids: [],
+              start_date: null,
+              end_date: null,
+            })
+            .eq("id", entry.asset_id)
+            .eq("status", "reserved");
         }
       }
       return { ok: true };

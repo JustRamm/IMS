@@ -21,25 +21,32 @@ export default function PhotoSlideshow({
   fitMode = "cover",
   allowFullscreen = true,
 }) {
-  const isLive =
-    asset?.status === "live" ||
-    Boolean(asset?.current_brand && asset?.status !== "available" && asset?.status !== "closed");
+  const isVacant =
+    asset?.status === "available" ||
+    asset?.status === "closed" ||
+    !asset?.current_brand ||
+    !asset?.current_brand?.trim();
 
-  const vacantPhoto = isLive ? null : getAssetVacantPhoto(asset);
+  const isLive = !isVacant && (asset?.status === "live" || Boolean(asset?.current_brand));
+  const vacantPhoto = getAssetVacantPhoto(asset);
   const defaultShots = vacantPhoto ? [vacantPhoto] : [];
 
-  const rawShots = [
-    ...(asset?.photo_urls ?? []),
-    ...(asset?.photo_url ? [asset.photo_url] : []),
-    ...(asset?.proof_photo_url ? [asset.proof_photo_url] : []),
-  ].filter(Boolean);
+  const rawShots = isVacant
+    ? defaultShots
+    : [
+        ...(asset?.photo_urls ?? []),
+        ...(asset?.photo_url ? [asset.photo_url] : []),
+        ...(asset?.proof_photo_url ? [asset.proof_photo_url] : []),
+      ].filter(Boolean);
 
   const filterLiveShots = (list) => {
     if (!isLive) return list;
     return list.filter((u) => u !== "/asset.png" && u !== "/mallasset.png");
   };
 
-  const initialShots = Array.from(new Set(filterLiveShots(rawShots)));
+  const initialShots = isVacant
+    ? defaultShots
+    : Array.from(new Set(filterLiveShots(rawShots)));
   const [shots, setShots] = useState(initialShots.length > 0 ? initialShots : defaultShots);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
@@ -48,6 +55,11 @@ export default function PhotoSlideshow({
   const [touchEndX, setTouchEndX] = useState(null);
 
   useEffect(() => {
+    if (isVacant) {
+      setShots(vacantPhoto ? [vacantPhoto] : []);
+      return;
+    }
+
     let active = true;
     const known = Array.from(new Set(filterLiveShots(rawShots)));
 

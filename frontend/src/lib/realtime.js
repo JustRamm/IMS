@@ -441,7 +441,16 @@ export async function processExpiredQueueEntries(userRole = null) {
           // No waitlist entries — mark asset available
           await supabase
             .from("assets")
-            .update({ status: "available" })
+            .update({
+              status: "available",
+              current_brand: null,
+              proof_photo_url: null,
+              proof_photo_ids: [],
+              photo_url: null,
+              photo_ids: [],
+              start_date: null,
+              end_date: null,
+            })
             .eq("id", q.asset_id);
         }
 
@@ -555,7 +564,16 @@ export async function promoteNextWaitlistOrFreeAsset(assetId, assetCode = "") {
       // No waitlist — free the asset
       await supabase
         .from("assets")
-        .update({ status: "available" })
+        .update({
+          status: "available",
+          current_brand: null,
+          proof_photo_url: null,
+          proof_photo_ids: [],
+          photo_url: null,
+          photo_ids: [],
+          start_date: null,
+          end_date: null,
+        })
         .eq("id", assetId);
     }
 

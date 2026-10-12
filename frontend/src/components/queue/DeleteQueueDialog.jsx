@@ -118,7 +118,16 @@ export default function DeleteQueueDialog({
           if (!activeCamps || activeCamps.length === 0) {
             await supabase
               .from("assets")
-              .update({ status: "available", current_brand: null })
+              .update({
+                status: "available",
+                current_brand: null,
+                proof_photo_url: null,
+                proof_photo_ids: [],
+                photo_url: null,
+                photo_ids: [],
+                start_date: null,
+                end_date: null,
+              })
               .eq("id", assetId);
           }
         }

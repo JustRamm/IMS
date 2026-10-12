@@ -525,11 +525,19 @@ export function AssetDialog({ asset, trigger }) {
         ? "live"
         : (asset?.status && ["reserved", "onboarding", "closing", "closed"].includes(asset.status) ? asset.status : "available");
 
+      const isAvailable = determinedStatus === "available" || !selectedBrand;
+
       const payload = {
         ...dbFields,
         notes: notesWithBrand,
-        current_brand: selectedBrand || null,
+        current_brand: isAvailable ? null : (selectedBrand || null),
         status: determinedStatus,
+        proof_photo_url: isAvailable ? null : (body.proof_photo_url || null),
+        proof_photo_ids: isAvailable ? [] : (body.proof_photo_ids || []),
+        photo_url: isAvailable ? null : (body.photo_url || null),
+        photo_ids: isAvailable ? [] : (body.photo_ids || []),
+        start_date: isAvailable ? null : (isCurrentlyLive ? body.start_date : null),
+        end_date: isAvailable ? null : (isCurrentlyLive ? body.end_date : null),
         latitude: body.latitude && !isNaN(Number(body.latitude)) ? Number(body.latitude) : null,
         longitude: body.longitude && !isNaN(Number(body.longitude)) ? Number(body.longitude) : null,
         geofence_radius_m: body.geofence_radius_m ? Number(body.geofence_radius_m) : 500,
@@ -788,10 +796,11 @@ export function AssetDialog({ asset, trigger }) {
               return;
             }
 
+            const isFreedAsset = !isLive && !form.brand_name && (!form.brand_names || form.brand_names.length === 0);
             const regularPhotoIds = photos.map((p) => p.id);
             const proofPhotoIds = proofPhotos.map((p) => p.id);
-            const primaryPhoto = photos[0]?.url || asset?.photo_url || "";
-            const primaryProofUrl = proofPhotos[0]?.url || asset?.proof_photo_url || "";
+            const primaryPhoto = photos[0]?.url || (isFreedAsset ? "" : (asset?.photo_url || ""));
+            const primaryProofUrl = proofPhotos[0]?.url || (isFreedAsset ? "" : (asset?.proof_photo_url || ""));
             save.mutate({
               ...form,
               asset_type: activeType,
@@ -799,10 +808,10 @@ export function AssetDialog({ asset, trigger }) {
               width_ft: Number(form.width_ft),
               height_ft: Number(form.height_ft),
               // Bug #1 fix: photo_ids = regular photos only (not merged with proof)
-              photo_ids: regularPhotoIds,
-              proof_photo_ids: proofPhotoIds,
-              proof_photo_url: primaryProofUrl,
-              photo_url: primaryPhoto,
+              photo_ids: isFreedAsset && photos.length === 0 ? [] : regularPhotoIds,
+              proof_photo_ids: isFreedAsset && proofPhotos.length === 0 ? [] : proofPhotoIds,
+              proof_photo_url: isFreedAsset && proofPhotos.length === 0 ? null : (primaryProofUrl || null),
+              photo_url: isFreedAsset && photos.length === 0 ? null : (primaryPhoto || null),
               // Only set dates when ad is live
               start_date: isLive ? form.start_date : null,
               end_date: isLive ? form.end_date : null,
