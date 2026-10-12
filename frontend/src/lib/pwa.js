@@ -85,20 +85,20 @@ export function registerServiceWorker() {
           // Once registered, prefetch all application route bundles into offline cache
           prefetchAllAppRoutes();
 
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener("controllerchange", () => {
+            if (!refreshing) {
+              refreshing = true;
+              window.location.reload();
+            }
+          });
+
           reg.onupdatefound = () => {
             const installingWorker = reg.installing;
             if (!installingWorker) return;
             installingWorker.onstatechange = () => {
               if (installingWorker.state === "installed" && navigator.serviceWorker.controller) {
-                toast.info("A new version of IMS is available!", {
-                  action: {
-                    label: "Update",
-                    onClick: () => {
-                      installingWorker.postMessage({ type: "SKIP_WAITING" });
-                      window.location.reload();
-                    },
-                  },
-                });
+                installingWorker.postMessage({ type: "SKIP_WAITING" });
               }
             };
           };
