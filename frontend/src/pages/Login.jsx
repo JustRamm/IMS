@@ -30,6 +30,7 @@ import sound from "@/lib/sound";
 import Skeleton from "@/components/skeletons/Skeleton";
 import { cn } from "@/lib/utils";
 import { getAppBaseUrl } from "@/lib/helpers";
+import { useMe } from "@/lib/queries";
 
 
 const ROLES = [
