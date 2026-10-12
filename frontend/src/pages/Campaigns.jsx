@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ClipboardList, Upload, WifiOff } from "lucide-react";
+import { ClipboardList, Pencil, Plus, Trash2, Upload, WifiOff } from "lucide-react";
 import AppShell from "@/components/layout/AppShell";
 import EmptyState from "@/components/shared/EmptyState";
 import Pagination from "@/components/shared/Pagination";
@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button";
 import { CampaignsSkeleton } from "@/components/skeletons";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useCampaigns } from "@/lib/queries";
+import CampaignFormDialog from "@/components/campaigns/CampaignFormDialog";
+import DeleteCampaignDialog from "@/components/campaigns/DeleteCampaignDialog";
+import { useCampaigns, useMe } from "@/lib/queries";
 import { STAGE_LABELS, downloadCsv, fmtDate, fmtMoney } from "@/lib/helpers";
 import { cacheCampaignsOffline, getCachedCampaignsOffline } from "@/lib/offlineStore";
 import { cn } from "@/lib/utils";
@@ -23,8 +25,14 @@ export default function Campaigns() {
   const [stage, setStage] = useState(urlStage);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(12);
+  const { data: me } = useMe();
   const { data: rawCampaigns, isError, isLoading } = useCampaigns(stage);
   const [offlineData, setOfflineData] = useState([]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState(null);
+  const [deletingCampaign, setDeletingCampaign] = useState(null);
+
+  const isAdmin = me?.role === "admin";
 
   useEffect(() => {
     const current = searchParams.get("stage");
@@ -65,31 +73,47 @@ export default function Campaigns() {
       title="Campaigns"
       subtitle="Confirmed bookings through onboarding, invoicing, live delivery and closure"
       actions={
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() =>
-            downloadCsv(
-              "campaigns.csv",
-              (campaigns ?? []).map((c) => ({
-                asset_code: c.asset_code,
-                brand: c.brand,
-                stage: c.stage,
-                salesperson: c.salesperson_name,
-                duration_days: c.duration_days,
-                proposed_days: c.proposed_duration_days,
-                start_date: c.start_date ?? "",
-                end_date: c.end_date ?? "",
-                invoice_number: c.invoice?.invoice_number ?? "",
-                invoice_total: c.invoice?.total_amount ?? "",
-              })),
-            )
-          }
-          data-testid="export-campaigns-button"
-        >
-          <Upload className="size-3.5" />
-          Export
-        </Button>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Button
+              size="xs"
+              onClick={() => {
+                setEditingCampaign(null);
+                setFormOpen(true);
+              }}
+              className="gap-1.5"
+              data-testid="add-campaign-button"
+            >
+              <Plus className="size-3.5" />
+              Add Campaign
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() =>
+              downloadCsv(
+                "campaigns.csv",
+                (campaigns ?? []).map((c) => ({
+                  asset_code: c.asset_code,
+                  brand: c.brand,
+                  stage: c.stage,
+                  salesperson: c.salesperson_name,
+                  duration_days: c.duration_days,
+                  proposed_days: c.proposed_duration_days,
+                  start_date: c.start_date ?? "",
+                  end_date: c.end_date ?? "",
+                  invoice_number: c.invoice?.invoice_number ?? "",
+                  invoice_total: c.invoice?.total_amount ?? "",
+                })),
+              )
+            }
+            data-testid="export-campaigns-button"
+          >
+            <Upload className="size-3.5" />
+            Export
+          </Button>
+        </div>
       }
     >
       <div className="space-y-4 flex-1 flex flex-col justify-between">
@@ -163,22 +187,64 @@ export default function Campaigns() {
                       </dl>
                     </div>
 
-                    {/* Footer info: Checklist / GTP / Cancellation */}
-                    <div className="flex flex-wrap items-center gap-1 sm:gap-2 pt-1.5 border-t border-border/40 text-[9px] sm:text-xs text-muted-foreground">
-                      {c.stage === "onboarding" && (
-                        <span className="mono-label rounded-md bg-secondary/70 px-1.5 py-0.5 text-[9px] sm:text-[11px]" data-testid="campaign-checklist-progress">
-                          Checklist {c.checklist_done}/{c.checklist_total}
-                        </span>
-                      )}
-                      {c.next_due && (
-                        <span className={cn("mono-label rounded-md px-1.5 py-0.5 text-[9px] sm:text-[11px]", c.overdue ? "bg-red-50 text-red-600 font-medium" : "bg-secondary/70")} data-testid="campaign-next-gtp">
-                          {c.overdue ? "GTP overdue" : "Next GTP"} {fmtDate(c.next_due)}
-                        </span>
-                      )}
-                      {c.cancellation?.status === "requested" && (
-                        <span className="mono-label rounded-md bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[9px] sm:text-[11px] font-medium">
-                          Cancellation pending
-                        </span>
+                    {/* Footer info: Checklist / GTP / Cancellation + Admin Actions */}
+                    <div className="flex flex-wrap items-center justify-between gap-1 sm:gap-2 pt-1.5 border-t border-border/40 text-[9px] sm:text-xs text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+                        {c.stage === "onboarding" && (
+                          <span className="mono-label rounded-md bg-secondary/70 px-1.5 py-0.5 text-[9px] sm:text-[11px]" data-testid="campaign-checklist-progress">
+                            Checklist {c.checklist_done}/{c.checklist_total}
+                          </span>
+                        )}
+                        {c.next_due && (
+                          <span className={cn("mono-label rounded-md px-1.5 py-0.5 text-[9px] sm:text-[11px]", c.overdue ? "bg-red-50 text-red-600 font-medium" : "bg-secondary/70")} data-testid="campaign-next-gtp">
+                            {c.overdue ? "GTP overdue" : "Next GTP"} {fmtDate(c.next_due)}
+                          </span>
+                        )}
+                        {c.cancellation?.status === "requested" && (
+                          <span className="mono-label rounded-md bg-amber-50 text-amber-700 px-1.5 py-0.5 text-[9px] sm:text-[11px] font-medium">
+                            Cancellation pending
+                          </span>
+                        )}
+                      </div>
+
+                      {isAdmin && (
+                        <div
+                          className="flex items-center gap-1 shrink-0 ml-auto"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-6 text-muted-foreground hover:text-primary"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setEditingCampaign(c);
+                              setFormOpen(true);
+                            }}
+                            title="Edit campaign"
+                            data-testid={`quick-edit-campaign-${c.id}`}
+                          >
+                            <Pencil className="size-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-6 text-muted-foreground hover:text-red-500"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDeletingCampaign(c);
+                            }}
+                            title="Delete campaign"
+                            data-testid={`quick-delete-campaign-${c.id}`}
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </CardContent>
@@ -202,6 +268,18 @@ export default function Campaigns() {
           </div>
         )}
       </div>
+
+      <CampaignFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        campaign={editingCampaign}
+      />
+
+      <DeleteCampaignDialog
+        open={Boolean(deletingCampaign)}
+        onOpenChange={(op) => !op && setDeletingCampaign(null)}
+        campaign={deletingCampaign}
+      />
     </AppShell>
   );
 }

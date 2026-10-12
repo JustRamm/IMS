@@ -175,7 +175,7 @@ export async function sendClientPortalEmail({
     },
     body: JSON.stringify({
       from: "Carbon & Whale IMS <onboarding@resend.dev>",
-      to: [to.trim()],
+      to: [to.trim().toLowerCase()],
       subject: `Ad Campaign Verification & Proof of Performance — ${brandName || "Carbon & Whale"}`,
       html: emailHtml,
     }),

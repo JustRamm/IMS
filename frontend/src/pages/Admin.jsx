@@ -1,10 +1,15 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { CalendarDays, Cog, Pencil, Shapes, Trash2, UserPlus, Users } from "lucide-react";
+import { CalendarDays, Cog, ExternalLink, Megaphone, Pencil, Plus, Shapes, Trash2, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import AppShell from "@/components/layout/AppShell";
 import EmptyState from "@/components/shared/EmptyState";
 import { AdminSkeleton } from "@/components/skeletons";
+import { StageBadge } from "@/components/shared/StatusBadges";
+import PriorityBadge from "@/components/shared/PriorityBadge";
+import CampaignFormDialog from "@/components/campaigns/CampaignFormDialog";
+import DeleteCampaignDialog from "@/components/campaigns/DeleteCampaignDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
-import { useAssetTypes, useHolidays, useMe, useRoles, useSettings, useUsers } from "@/lib/queries";
+import { useAssetTypes, useCampaigns, useHolidays, useMe, useRoles, useSettings, useUsers } from "@/lib/queries";
 import { errMessage, fmtDate } from "@/lib/helpers";
 
 function UsersPanel() {
@@ -733,6 +738,183 @@ function AssetTypesPanel() {
   );
 }
 
+function CampaignsPanel() {
+  const [stageFilter, setStageFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const { data: rawCampaigns = [], isLoading } = useCampaigns(stageFilter);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState(null);
+  const [deletingCampaign, setDeletingCampaign] = useState(null);
+
+  const campaigns = (rawCampaigns ?? []).filter((c) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      c.brand?.toLowerCase().includes(q) ||
+      c.asset_code?.toLowerCase().includes(q) ||
+      c.salesperson_name?.toLowerCase().includes(q)
+    );
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-border/70 bg-card/70">
+        <CardHeader className="pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 font-heading text-base">
+              <Megaphone className="size-4 text-primary" />
+              Campaign Management
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Edit campaign windows, sales representatives, brands, and associated media assets, or directly add and delete campaigns.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingCampaign(null);
+              setFormOpen(true);
+            }}
+            className="gap-1.5 shrink-0"
+            data-testid="admin-add-campaign-button"
+          >
+            <Plus className="size-4" />
+            Add Campaign
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-2.5 items-center justify-between">
+            <Input
+              placeholder="Search by brand, asset code, or salesperson..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full sm:max-w-xs text-xs"
+              data-testid="admin-campaign-search"
+            />
+            <Select value={stageFilter} onValueChange={setStageFilter}>
+              <SelectTrigger className="w-full sm:w-44 text-xs" data-testid="admin-campaign-stage-filter">
+                <SelectValue placeholder="All stages" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All stages</SelectItem>
+                <SelectItem value="onboarding">Onboarding</SelectItem>
+                <SelectItem value="invoicing">Invoicing</SelectItem>
+                <SelectItem value="live">Live</SelectItem>
+                <SelectItem value="closing">Closing</SelectItem>
+                <SelectItem value="closed">Closed</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {isLoading ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">Loading campaigns...</p>
+          ) : campaigns.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border/70 p-8 text-center">
+              <p className="text-sm font-medium text-muted-foreground">No campaigns found</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {search ? "No campaigns match your search query." : "Click 'Add Campaign' to create a new campaign directly."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-border/70">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-muted/40 font-semibold text-muted-foreground border-b border-border/70">
+                  <tr>
+                    <th className="py-2.5 px-3">Brand & Asset</th>
+                    <th className="py-2.5 px-3">Campaign Window</th>
+                    <th className="py-2.5 px-3">Sales Person</th>
+                    <th className="py-2.5 px-3">Stage / Priority</th>
+                    <th className="py-2.5 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {campaigns.map((c) => (
+                    <tr key={c.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="py-2.5 px-3">
+                        <div className="font-semibold text-foreground flex items-center gap-1.5">
+                          <span>{c.brand}</span>
+                          <Link
+                            to={`/campaigns/${c.id}`}
+                            className="text-muted-foreground hover:text-primary"
+                            title="View campaign record"
+                          >
+                            <ExternalLink className="size-3" />
+                          </Link>
+                        </div>
+                        <div className="mono-label text-[11px] text-muted-foreground">
+                          {c.asset_code}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="text-foreground">
+                          {c.start_date ? `${fmtDate(c.start_date)} → ${fmtDate(c.end_date)}` : "Not set"}
+                        </div>
+                        <div className="mono-label text-[11px] text-muted-foreground">
+                          {c.duration_days} days
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className="text-foreground">
+                          {c.salesperson_name || <span className="text-muted-foreground italic">Unassigned</span>}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StageBadge stage={c.stage} />
+                          <PriorityBadge priority={c.priority} />
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            onClick={() => {
+                              setEditingCampaign(c);
+                              setFormOpen(true);
+                            }}
+                            className="gap-1"
+                            data-testid={`admin-edit-campaign-${c.id}`}
+                          >
+                            <Pencil className="size-3" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            onClick={() => setDeletingCampaign(c)}
+                            className="gap-1 text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-950/20"
+                            data-testid={`admin-delete-campaign-${c.id}`}
+                          >
+                            <Trash2 className="size-3" />
+                            Delete
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <CampaignFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        campaign={editingCampaign}
+      />
+
+      <DeleteCampaignDialog
+        open={Boolean(deletingCampaign)}
+        onOpenChange={(op) => !op && setDeletingCampaign(null)}
+        campaign={deletingCampaign}
+      />
+    </div>
+  );
+}
+
 export default function Admin() {
   const { data: me, isLoading } = useMe();
 
@@ -763,6 +945,9 @@ export default function Admin() {
           <TabsTrigger value="users" data-testid="tab-users">
             Users
           </TabsTrigger>
+          <TabsTrigger value="campaigns" data-testid="tab-campaigns">
+            Campaigns
+          </TabsTrigger>
           <TabsTrigger value="asset-types" data-testid="tab-asset-types">
             Asset Types
           </TabsTrigger>
@@ -775,6 +960,9 @@ export default function Admin() {
         </TabsList>
         <TabsContent value="users" className="pt-4">
           <UsersPanel />
+        </TabsContent>
+        <TabsContent value="campaigns" className="pt-4">
+          <CampaignsPanel />
         </TabsContent>
         <TabsContent value="asset-types" className="pt-4">
           <AssetTypesPanel />
