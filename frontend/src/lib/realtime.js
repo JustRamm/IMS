@@ -273,16 +273,19 @@ export function clearAllNotifications() {
  */
 export async function processExpiredQueueEntries() {
   try {
+    const { data: authData } = await supabase.auth.getSession();
+    if (!authData?.session?.user) return; // Only authenticated users run queue SLA processing
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().split("T")[0];
 
-    const { data: queueEntries } = await supabase
+    const { data: queueEntries, error: qErr } = await supabase
       .from("queue_entries")
       .select("*")
       .eq("state", "active");
 
-    if (!queueEntries || queueEntries.length === 0) return;
+    if (qErr || !queueEntries || queueEntries.length === 0) return;
 
     const { data: settings } = await supabase
       .from("settings")

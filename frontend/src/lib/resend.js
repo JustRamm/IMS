@@ -181,21 +181,12 @@ export async function sendClientPortalEmail({
         html: emailHtml,
       }),
     });
-  } catch {
-    // Fallback in case /api/send-email is unreachable directly
-    response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: "Carbon & Whale IMS <onboarding@resend.dev>",
-        to: [to.trim().toLowerCase()],
-        subject: `Ad Campaign Verification & Proof of Performance — ${brandName || "Carbon & Whale"}`,
-        html: emailHtml,
-      }),
-    });
+  } catch (err) {
+    throw new Error(
+      err?.message?.includes("Failed to fetch")
+        ? "Network error contacting email service. Please check your internet connection or deployment status."
+        : err?.message || "Failed to contact email service."
+    );
   }
 
   const resData = await response.json().catch(() => ({}));

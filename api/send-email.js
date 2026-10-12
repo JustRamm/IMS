@@ -1,15 +1,17 @@
 export default async function handler(req, res) {
-  // Set CORS headers – allow production site and localhost dev
-  const allowedOrigins = [
-    "https://ims-bice-five.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-  ];
   const origin = req.headers.origin || "";
-  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  const isAllowedOrigin =
+    !origin ||
+    origin.endsWith(".vercel.app") ||
+    origin.includes("localhost") ||
+    origin.includes("127.0.0.1") ||
+    origin.includes("carbonandwhale.com");
+
+  const corsOrigin = isAllowedOrigin ? origin || "*" : "https://ims-bice-five.vercel.app";
   res.setHeader("Access-Control-Allow-Origin", corsOrigin);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Max-Age", "86400");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
