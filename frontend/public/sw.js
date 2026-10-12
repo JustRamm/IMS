@@ -1,4 +1,4 @@
-const CACHE_NAME = "ims-cache-v1";
+const CACHE_NAME = "ims-cache-v2";
 
 const PRECACHE_ASSETS = [
   "/",

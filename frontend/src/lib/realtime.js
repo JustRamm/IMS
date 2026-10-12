@@ -271,10 +271,22 @@ export function clearAllNotifications() {
  * 6. If no waitlist exists, frees the asset (status = "available").
  * 7. Broadcasts live notifications to all users.
  */
-export async function processExpiredQueueEntries() {
+export async function processExpiredQueueEntries(userRole = null) {
   try {
     const { data: authData } = await supabase.auth.getSession();
     if (!authData?.session?.user) return; // Only authenticated users run queue SLA processing
+
+    // Only admin or ops roles have database permissions to mutate queue SLA states
+    let role = userRole;
+    if (!role) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.session.user.id)
+        .maybeSingle();
+      role = profile?.role;
+    }
+    if (role !== "admin" && role !== "ops") return;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -324,14 +336,18 @@ export async function processExpiredQueueEntries() {
 
       if (isExpired) {
         // 1. Forfeit the expired slot
-        await supabase
-          .from("queue_entries")
-          .update({
-            state: "forfeited",
-            closed_at: new Date().toISOString(),
-            cancel_reason: "5-day SLA expired without confirmation",
-          })
-          .eq("id", q.id);
+        try {
+          await supabase
+            .from("queue_entries")
+            .update({
+              state: "forfeited",
+              closed_at: new Date().toISOString(),
+              cancel_reason: "5-day SLA expired without confirmation",
+            })
+            .eq("id", q.id);
+        } catch {
+          continue;
+        }
 
         // 2. Audit log
         await supabase.from("audit_logs").insert({
@@ -650,7 +666,7 @@ export function initRealtimeFeed(currentUser = null) {
 
   if (!backgroundIntervalId) {
     backgroundIntervalId = setInterval(() => {
-      processExpiredQueueEntries();
+      processExpiredQueueEntries(currentUser?.role);
     }, 5 * 60 * 1000);
   }
 
