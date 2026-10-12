@@ -1,13 +1,14 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { Building2, FileDown, Loader2, Mail, Phone, Plus, Search, Upload, User } from "lucide-react";
+import { Building2, FileDown, Loader2, Mail, Phone, Plus, Search, Trash2, Upload, User } from "lucide-react";
 import { toast } from "sonner";
 import AppShell from "@/components/layout/AppShell";
 import EmptyState from "@/components/shared/EmptyState";
 import Pagination from "@/components/shared/Pagination";
 import { Button } from "@/components/ui/button";
 import { BrandsSkeleton } from "@/components/skeletons";
+import DeleteBrandDialog from "@/components/brands/DeleteBrandDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -226,9 +227,11 @@ function BrandDialog() {
 
 export default function Brands() {
   const { data: me } = useMe();
+  const isAdmin = me?.role === "admin";
   const [q, setQ] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(12);
+  const [brandToDelete, setBrandToDelete] = useState(null);
 
   const { data: brands = [], isError, isLoading } = useBrands(q);
   const canCreate = me?.role === "sales" || me?.role === "admin" || me?.role === "ops";
@@ -378,8 +381,27 @@ export default function Brands() {
                               </p>
                             )}
                           </div>
-                          <div className="flex size-6 sm:size-7 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
-                            <Building2 className="size-3 sm:size-3.5" />
+                          <div className="flex items-center gap-1 shrink-0">
+                            {isAdmin && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="size-6 sm:size-7 text-muted-foreground/60 hover:text-red-600 hover:bg-red-500/10 transition-colors"
+                                title={`Delete ${b.name}`}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setBrandToDelete(b);
+                                }}
+                                data-testid={`delete-brand-button-${b.name.replace(/\s+/g, "-")}`}
+                              >
+                                <Trash2 className="size-3 sm:size-3.5" />
+                              </Button>
+                            )}
+                            <div className="flex size-6 sm:size-7 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
+                              <Building2 className="size-3 sm:size-3.5" />
+                            </div>
                           </div>
                         </div>
 
@@ -442,6 +464,17 @@ export default function Brands() {
               itemLabel="brands"
             />
           </div>
+        )}
+
+        {brandToDelete && (
+          <DeleteBrandDialog
+            brand={brandToDelete}
+            open={Boolean(brandToDelete)}
+            onOpenChange={(isOpen) => {
+              if (!isOpen) setBrandToDelete(null);
+            }}
+            onSuccess={() => setBrandToDelete(null)}
+          />
         )}
       </div>
     </AppShell>

@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowLeft, Building2, Copy, ExternalLink, Mail, Pencil, Phone, User } from "lucide-react";
+import { ArrowLeft, Building2, Copy, ExternalLink, Mail, Pencil, Phone, Trash2, User } from "lucide-react";
 import { toast } from "sonner";
 import AppShell from "@/components/layout/AppShell";
 import EmptyState from "@/components/shared/EmptyState";
@@ -10,6 +10,7 @@ import { AssetStatusBadge, StageBadge } from "@/components/shared/StatusBadges";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { BrandDetailSkeleton } from "@/components/skeletons";
 import SendClientEmailDialog from "@/components/shared/SendClientEmailDialog";
+import DeleteBrandDialog from "@/components/brands/DeleteBrandDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -120,9 +121,12 @@ function EditBrandDialog({ brand }) {
 
 export default function BrandDetail() {
   const { brandId } = useParams();
+  const navigate = useNavigate();
   const { data: me } = useMe();
   const { data: brand, isError, isLoading } = useBrand(brandId);
   const canEdit = me?.role === "sales" || me?.role === "admin";
+  const isAdmin = me?.role === "admin";
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const assetById = Object.fromEntries((brand?.assets || []).map((a) => [a.id, a]));
 
@@ -164,6 +168,26 @@ export default function BrandDetail() {
           )}
           {brand && <SendClientEmailDialog brand={brand} />}
           {brand && canEdit && <EditBrandDialog brand={brand} />}
+          {brand && isAdmin && (
+            <Button
+              variant="outline"
+              size="xs"
+              className="gap-1.5 text-red-600 dark:text-red-400 border-red-500/30 hover:bg-red-500/10 cursor-pointer shrink-0"
+              onClick={() => setDeleteOpen(true)}
+              data-testid="delete-brand-button"
+            >
+              <Trash2 className="size-3.5" />
+              <span>Delete</span>
+            </Button>
+          )}
+          {brand && (
+            <DeleteBrandDialog
+              brand={brand}
+              open={deleteOpen}
+              onOpenChange={setDeleteOpen}
+              onSuccess={() => navigate("/brands")}
+            />
+          )}
         </div>
       }
     >
