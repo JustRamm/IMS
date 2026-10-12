@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -10,8 +10,10 @@ import {
   Copy,
   ExternalLink,
   Mail,
+  Pencil,
   Receipt,
   Rocket,
+  Trash2,
   WifiOff,
   XCircle,
 } from "lucide-react";
@@ -22,6 +24,8 @@ import FileUploader from "@/components/shared/FileUploader";
 import DocumentList from "@/components/shared/DocumentList";
 import AuditTrail from "@/components/shared/AuditTrail";
 import SendClientEmailDialog from "@/components/shared/SendClientEmailDialog";
+import CampaignFormDialog from "@/components/campaigns/CampaignFormDialog";
+import DeleteCampaignDialog from "@/components/campaigns/DeleteCampaignDialog";
 import { GtpStatusBadge, StageBadge } from "@/components/shared/StatusBadges";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { CampaignDetailSkeleton } from "@/components/skeletons";
@@ -1100,9 +1104,12 @@ function CancellationPanel({ campaign }) {
 
 export default function CampaignDetail() {
   const { campaignId } = useParams();
+  const navigate = useNavigate();
   const { data: me } = useMe();
   const { data: campaign, isError, isLoading } = useCampaign(campaignId);
   const refresh = useRefresh(campaignId);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const onboard = useMutation({
     mutationFn: async () => {
@@ -1212,6 +1219,30 @@ export default function CampaignDetail() {
             </Link>
           )}
           {campaign && <SendClientEmailDialog campaign={campaign} />}
+          {campaign && me?.role === "admin" && (
+            <>
+              <Button
+                variant="outline"
+                size="xs"
+                className="gap-1.5 cursor-pointer shrink-0"
+                onClick={() => setEditOpen(true)}
+                data-testid="admin-edit-campaign-button"
+              >
+                <Pencil className="size-3.5" />
+                <span>Edit</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="xs"
+                className="gap-1.5 text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-950/20 cursor-pointer shrink-0"
+                onClick={() => setDeleteOpen(true)}
+                data-testid="admin-delete-campaign-button"
+              >
+                <Trash2 className="size-3.5" />
+                <span>Delete</span>
+              </Button>
+            </>
+          )}
         </div>
       }
     >
@@ -1436,6 +1467,22 @@ export default function CampaignDetail() {
             </TabsContent>
           </Tabs>
         </div>
+      )}
+
+      {campaign && (
+        <>
+          <CampaignFormDialog
+            open={editOpen}
+            onOpenChange={setEditOpen}
+            campaign={campaign}
+          />
+          <DeleteCampaignDialog
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            campaign={campaign}
+            onSuccess={() => navigate("/campaigns")}
+          />
+        </>
       )}
     </AppShell>
   );

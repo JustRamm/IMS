@@ -278,14 +278,21 @@ export default function Login({ initialMode }) {
       const cleanEmail = targetEmail.trim().toLowerCase();
       if (!cleanEmail) throw new Error("Please enter your work email.");
 
-      // Check if user is an authorized staff member
-      const { data: authRecord } = await supabase
-        .from("authorized_users")
-        .select("email, is_registered, name")
-        .eq("email", cleanEmail)
-        .maybeSingle();
+      // Check if user is an authorized staff member or has an existing profile
+      const [{ data: authRecord }, { data: profileRecord }] = await Promise.all([
+        supabase
+          .from("authorized_users")
+          .select("email, is_registered, name")
+          .eq("email", cleanEmail)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("email, name")
+          .eq("email", cleanEmail)
+          .maybeSingle(),
+      ]);
 
-      if (!authRecord) {
+      if (!authRecord && !profileRecord) {
         throw new Error(
           "Account not found: This email is not registered with Carbon & Whale IMS. Please verify your email or contact an administrator."
         );
