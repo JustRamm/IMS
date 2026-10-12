@@ -426,6 +426,26 @@ export function useQueueList() {
   });
 }
 
+export function useAdminQueueEntries(filter = "all") {
+  return useQuery({
+    queryKey: ["admin_queue_entries", filter],
+    queryFn: async () => {
+      let q = supabase.from("queue_entries").select("*").order("created_at", { ascending: false });
+      if (filter && filter !== "all") {
+        if (filter === "open") {
+          q = q.in("state", ["active", "pending"]);
+        } else {
+          q = q.eq("state", filter);
+        }
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5 * 1000,
+  });
+}
+
 export function useAssetQueue(assetId) {
   return useQuery({
     queryKey: ["queue", "asset", assetId],

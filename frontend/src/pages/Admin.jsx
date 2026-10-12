@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { CalendarDays, Cog, ExternalLink, Megaphone, Pencil, Plus, Shapes, Trash2, UserPlus, Users } from "lucide-react";
+import { CalendarDays, Cog, ExternalLink, ListOrdered, Megaphone, Pencil, Plus, Shapes, Trash2, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import AppShell from "@/components/layout/AppShell";
 import EmptyState from "@/components/shared/EmptyState";
@@ -10,6 +10,7 @@ import { StageBadge } from "@/components/shared/StatusBadges";
 import PriorityBadge from "@/components/shared/PriorityBadge";
 import CampaignFormDialog from "@/components/campaigns/CampaignFormDialog";
 import DeleteCampaignDialog from "@/components/campaigns/DeleteCampaignDialog";
+import DeleteQueueDialog from "@/components/queue/DeleteQueueDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
-import { useAssetTypes, useCampaigns, useHolidays, useMe, useRoles, useSettings, useUsers } from "@/lib/queries";
+import { useAssetTypes, useCampaigns, useHolidays, useMe, useRoles, useSettings, useUsers, useAdminQueueEntries } from "@/lib/queries";
 import { errMessage, fmtDate } from "@/lib/helpers";
 
 function UsersPanel() {
@@ -920,6 +921,167 @@ function CampaignsPanel() {
   );
 }
 
+function QueuePanel() {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [deletingEntry, setDeletingEntry] = useState(null);
+
+  const { data: queueEntries = [], isLoading } = useAdminQueueEntries(filter);
+
+  const filteredEntries = queueEntries.filter((e) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      (e.brand && e.brand.toLowerCase().includes(q)) ||
+      (e.asset_code && e.asset_code.toLowerCase().includes(q))
+    );
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <ListOrdered className="size-4 text-primary" />
+              Interest Queue Management
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Inspect all queue entries and safely delete or clean up active and waitlisted entries.
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <Input
+              placeholder="Filter by brand or asset code…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-xs text-xs h-8"
+              data-testid="admin-queue-search"
+            />
+            <Select value={filter} onValueChange={setFilter}>
+              <SelectTrigger className="w-44 text-xs h-8" data-testid="admin-queue-status-select">
+                <SelectValue placeholder="All entries" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="open">Open (Active & Waitlist)</SelectItem>
+                <SelectItem value="active">Active slot only</SelectItem>
+                <SelectItem value="pending">Waitlist only</SelectItem>
+                <SelectItem value="confirmed">Confirmed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectItem value="forfeited">Forfeited</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {isLoading ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">Loading queue entries…</p>
+          ) : filteredEntries.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border/70 p-8 text-center">
+              <p className="text-sm font-medium text-muted-foreground">No queue entries found</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {search ? "No entries match your search query." : "There are no interest queue records matching this filter."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-border/70">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-muted/40 font-semibold text-muted-foreground border-b border-border/70">
+                  <tr>
+                    <th className="py-2.5 px-3">Brand & Asset</th>
+                    <th className="py-2.5 px-3">State / Slot</th>
+                    <th className="py-2.5 px-3">Duration & Expiry</th>
+                    <th className="py-2.5 px-3">Created</th>
+                    <th className="py-2.5 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {filteredEntries.map((entry) => (
+                    <tr key={entry.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="py-2.5 px-3">
+                        <div className="font-semibold text-foreground flex items-center gap-1.5">
+                          <span>{entry.brand}</span>
+                        </div>
+                        <div className="mono-label text-[11px] text-muted-foreground flex items-center gap-1">
+                          <Link
+                            to={`/assets/${entry.asset_id}`}
+                            className="hover:text-primary transition-colors inline-flex items-center gap-1"
+                          >
+                            {entry.asset_code}
+                            <ExternalLink className="size-2.5" />
+                          </Link>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        {entry.state === "active" && (
+                          <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px]">
+                            Active Slot
+                          </Badge>
+                        )}
+                        {entry.state === "pending" && (
+                          <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-[10px]">
+                            Waitlist #{entry.position}
+                          </Badge>
+                        )}
+                        {entry.state === "confirmed" && (
+                          <Badge className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 text-[10px]">
+                            Confirmed
+                          </Badge>
+                        )}
+                        {entry.state === "cancelled" && (
+                          <Badge variant="outline" className="text-muted-foreground text-[10px]">
+                            Cancelled
+                          </Badge>
+                        )}
+                        {entry.state === "forfeited" && (
+                          <Badge variant="outline" className="text-muted-foreground text-[10px]">
+                            Forfeited
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="text-foreground">
+                          {entry.proposed_duration_days ? `${entry.proposed_duration_days} days` : "—"}
+                        </div>
+                        <div className="mono-label text-[11px] text-muted-foreground">
+                          {entry.expires_on ? `Expires: ${fmtDate(entry.expires_on)}` : "No expiry"}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-muted-foreground">
+                        {fmtDate(entry.created_at)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          onClick={() => setDeletingEntry(entry)}
+                          className="gap-1 text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-950/20"
+                          data-testid={`admin-delete-queue-${entry.id}`}
+                        >
+                          <Trash2 className="size-3" />
+                          Delete
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <DeleteQueueDialog
+        open={Boolean(deletingEntry)}
+        onOpenChange={(op) => !op && setDeletingEntry(null)}
+        entry={deletingEntry}
+      />
+    </div>
+  );
+}
+
 export default function Admin() {
   const { data: me, isLoading } = useMe();
 
@@ -953,6 +1115,9 @@ export default function Admin() {
           <TabsTrigger value="campaigns" data-testid="tab-campaigns">
             Campaigns
           </TabsTrigger>
+          <TabsTrigger value="queue" data-testid="tab-queue">
+            Queue
+          </TabsTrigger>
           <TabsTrigger value="asset-types" data-testid="tab-asset-types">
             Asset Types
           </TabsTrigger>
@@ -968,6 +1133,9 @@ export default function Admin() {
         </TabsContent>
         <TabsContent value="campaigns" className="pt-4">
           <CampaignsPanel />
+        </TabsContent>
+        <TabsContent value="queue" className="pt-4">
+          <QueuePanel />
         </TabsContent>
         <TabsContent value="asset-types" className="pt-4">
           <AssetTypesPanel />

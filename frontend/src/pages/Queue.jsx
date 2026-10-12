@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { CheckCircle2, ListOrdered, Upload } from "lucide-react";
+import { CheckCircle2, ListOrdered, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
+import DeleteQueueDialog from "@/components/queue/DeleteQueueDialog";
 import AppShell from "@/components/layout/AppShell";
 import EmptyState from "@/components/shared/EmptyState";
 import FileUploader from "@/components/shared/FileUploader";
@@ -215,6 +216,7 @@ export default function Queue() {
   const { data: me } = useMe();
   const { data: entries, isError, isLoading } = useQueueList();
   const [onlyMine, setOnlyMine] = useState(false);
+  const [deletingEntry, setDeletingEntry] = useState(null);
 
   const withdraw = useMutation({
     mutationFn: async (id) => {
@@ -429,6 +431,19 @@ export default function Queue() {
                               Withdraw
                             </Button>
                           )}
+                          {me?.role === "admin" && (
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              onClick={() => setDeletingEntry(active)}
+                              className="h-6 px-1.5 text-[10px] sm:text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                              data-testid={`admin-delete-active-${active.id}`}
+                              title="Delete queue entry (admin)"
+                            >
+                              <Trash2 className="size-3 mr-1" />
+                              Delete
+                            </Button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -452,17 +467,32 @@ export default function Queue() {
                                 · {e.proposed_duration_days}d
                               </span>
                             </div>
-                            {me?.role === "sales" && e.salesperson_id === me.id && (
-                              <Button
-                                variant="ghost"
-                                size="xs"
-                                onClick={() => withdraw.mutate(e.id)}
-                                className="h-5 px-1 text-[9px] text-muted-foreground hover:text-destructive"
-                                data-testid="withdraw-waitlist-button"
-                              >
-                                Withdraw
-                              </Button>
-                            )}
+                            <div className="flex items-center gap-1">
+                              {me?.role === "sales" && e.salesperson_id === me.id && (
+                                <Button
+                                  variant="ghost"
+                                  size="xs"
+                                  onClick={() => withdraw.mutate(e.id)}
+                                  className="h-5 px-1 text-[9px] text-muted-foreground hover:text-destructive"
+                                  data-testid="withdraw-waitlist-button"
+                                >
+                                  Withdraw
+                                </Button>
+                              )}
+                              {me?.role === "admin" && (
+                                <Button
+                                  variant="ghost"
+                                  size="xs"
+                                  onClick={() => setDeletingEntry(e)}
+                                  className="h-5 px-1 text-[9px] text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                  data-testid={`admin-delete-waitlist-${e.id}`}
+                                  title="Delete queue entry (admin)"
+                                >
+                                  <Trash2 className="size-2.5 mr-0.5" />
+                                  Delete
+                                </Button>
+                              )}
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -474,6 +504,12 @@ export default function Queue() {
           })}
         </div>
       </div>
+
+      <DeleteQueueDialog
+        open={Boolean(deletingEntry)}
+        onOpenChange={(op) => !op && setDeletingEntry(null)}
+        entry={deletingEntry}
+      />
     </AppShell>
   );
 }
