@@ -843,6 +843,11 @@ function CampaignsPanel() {
                         </div>
                         <div className="mono-label text-[11px] text-muted-foreground">
                           {c.asset_code}
+                          {Array.isArray(c.extra_assets) && c.extra_assets.length > 0 && (
+                            <span className="ml-1 text-[10px] text-primary/80 font-medium">
+                              (+{c.extra_assets.length} more)
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="py-2.5 px-3">

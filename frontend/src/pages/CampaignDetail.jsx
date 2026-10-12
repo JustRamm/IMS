@@ -1260,11 +1260,21 @@ export default function CampaignDetail() {
                   <div className="flex flex-wrap items-center gap-2">
                     <Link
                       to={`/assets/${campaign.asset_id}`}
-                      className="mono-label text-primary hover:text-sky-300"
+                      className="mono-label text-primary hover:text-sky-300 font-semibold"
                       data-testid="campaign-asset-link"
                     >
                       {campaign.asset_code}
                     </Link>
+                    {Array.isArray(campaign.extra_assets) && campaign.extra_assets.map((ea) => (
+                      <Link
+                        key={ea.id}
+                        to={`/assets/${ea.id}`}
+                        className="mono-label text-primary/80 hover:text-sky-300 border border-border/70 bg-secondary/40 rounded px-1.5 py-0.5 text-xs transition-colors"
+                        title="Associated Asset"
+                      >
+                        +{ea.code || "Asset"}
+                      </Link>
+                    ))}
                     <StageBadge stage={campaign.stage} />
                     <PriorityBadge priority={campaign.priority} />
                   </div>

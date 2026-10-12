@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Calendar, User, Briefcase, Monitor, CheckCircle2, AlertCircle, Plus, Edit } from "lucide-react";
+import { Calendar, User, Briefcase, Monitor, Plus, Edit, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,11 +15,24 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
 import { useUsers, useBrands, useAssets, useMe } from "@/lib/queries";
 import { promoteNextWaitlistOrFreeAsset } from "@/lib/realtime";
 import { errMessage } from "@/lib/helpers";
+
+/** Convert legacy single asset_id/asset_code into the multi-asset array format */
+function normaliseCampaignAssets(campaign) {
+  if (!campaign) return [];
+  if (Array.isArray(campaign.extra_assets) && campaign.extra_assets.length > 0) {
+    const primary = campaign.asset_id ? [{ id: campaign.asset_id, code: campaign.asset_code || "" }] : [];
+    const extra = campaign.extra_assets.filter((a) => a.id && a.id !== campaign.asset_id);
+    return [...primary, ...extra];
+  }
+  if (campaign.asset_id) return [{ id: campaign.asset_id, code: campaign.asset_code || "" }];
+  return [];
+}
 
 const STAGES = [
   { value: "onboarding", label: "Onboarding" },
@@ -67,12 +80,11 @@ export default function CampaignFormDialog({
     brand_id: "",
     brand: "",
     custom_brand: "",
-    asset_id: "",
-    asset_code: "",
     stage: "onboarding",
     priority: "high",
   });
 
+  const [assetRows, setAssetRows] = useState([{ id: "", code: "" }]);
   const [isCustomBrand, setIsCustomBrand] = useState(false);
 
   // Sync form when opening or campaign changes
@@ -89,11 +101,11 @@ export default function CampaignFormDialog({
         brand_id: campaign.brand_id || "",
         brand: campaign.brand || "",
         custom_brand: "",
-        asset_id: campaign.asset_id || "",
-        asset_code: campaign.asset_code || "",
         stage: campaign.stage || "onboarding",
         priority: campaign.priority || "high",
       });
+      const existingAssets = normaliseCampaignAssets(campaign);
+      setAssetRows(existingAssets.length > 0 ? existingAssets : [{ id: "", code: "" }]);
       // Check if brand exists in brands list
       const matchedBrand = brands.find((b) => b.id === campaign.brand_id || b.name?.toLowerCase() === campaign.brand?.toLowerCase());
       setIsCustomBrand(!matchedBrand && Boolean(campaign.brand));
@@ -107,11 +119,10 @@ export default function CampaignFormDialog({
         brand_id: "",
         brand: "",
         custom_brand: "",
-        asset_id: "",
-        asset_code: "",
         stage: "onboarding",
         priority: "high",
       });
+      setAssetRows([{ id: "", code: "" }]);
       setIsCustomBrand(false);
     }
   }, [open, campaign, brands, me]);
@@ -184,29 +195,35 @@ export default function CampaignFormDialog({
     }));
   };
 
-  const handleAssetSelect = (assetId) => {
+  const handleAssetSelect = (idx, assetId) => {
     const selected = assets.find((a) => a.id === assetId);
-    setForm((f) => ({
-      ...f,
-      asset_id: assetId,
-      asset_code: selected?.asset_code || "",
-    }));
+    setAssetRows((rows) =>
+      rows.map((row, i) => (i === idx ? { id: assetId, code: selected?.asset_code || "" } : row))
+    );
   };
+
+  const addAssetRow = () => setAssetRows((rows) => [...rows, { id: "", code: "" }]);
+  const removeAssetRow = (idx) => setAssetRows((rows) => rows.filter((_, i) => i !== idx));
+  const selectedAssetIds = assetRows.map((r) => r.id).filter(Boolean);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const brandName = isCustomBrand ? form.custom_brand.trim() : form.brand.trim();
       if (!brandName) throw new Error("Brand name is required");
-      if (!form.asset_id) throw new Error("Associated asset is required");
+      const validAssets = assetRows.filter((r) => r.id);
+      if (validAssets.length === 0) throw new Error("At least one associated asset is required");
       if (!form.start_date || !form.end_date) throw new Error("Campaign start and end dates are required");
 
       const finalDuration = Number(form.duration_days) || Math.max(1, Math.round((new Date(form.end_date) - new Date(form.start_date)) / (1000 * 60 * 60 * 24)));
+      const primaryAsset = validAssets[0];
+      const extraAssets = validAssets.slice(1);
 
       if (isEdit) {
         // --- EDIT CAMPAIGN ---
         const updates = {
-          asset_id: form.asset_id,
-          asset_code: form.asset_code,
+          asset_id: primaryAsset.id,
+          asset_code: primaryAsset.code,
+          extra_assets: extraAssets,
           brand: brandName,
           brand_id: form.brand_id || null,
           salesperson_id: form.salesperson_id || null,
@@ -222,36 +239,30 @@ export default function CampaignFormDialog({
         if (error) throw { body: { detail: error.message } };
 
         // If asset changed, update previous & new asset
-        if (campaign.asset_id && campaign.asset_id !== form.asset_id) {
+        if (campaign.asset_id && campaign.asset_id !== primaryAsset.id) {
           await promoteNextWaitlistOrFreeAsset(campaign.asset_id, campaign.asset_code);
           if (["live", "onboarding"].includes(form.stage)) {
             await supabase
               .from("assets")
-              .update({
-                status: form.stage === "live" ? "live" : "onboarding",
-                current_brand: brandName,
-              })
-              .eq("id", form.asset_id);
+              .update({ status: form.stage === "live" ? "live" : "onboarding", current_brand: brandName })
+              .eq("id", primaryAsset.id);
           }
         } else if (["live", "onboarding"].includes(form.stage)) {
-          // If brand or stage updated on same asset
           await supabase
             .from("assets")
-            .update({
-              status: form.stage === "live" ? "live" : "onboarding",
-              current_brand: brandName,
-            })
-            .eq("id", form.asset_id);
+            .update({ status: form.stage === "live" ? "live" : "onboarding", current_brand: brandName })
+            .eq("id", primaryAsset.id);
         }
 
         // Audit log
+        const assetList = validAssets.map((a) => a.code).join(", ");
         await supabase.from("audit_logs").insert({
           id: crypto.randomUUID(),
           entity_type: "campaign",
           entity_id: campaign.id,
           action: "campaign_edited_by_admin",
           actor_name: me?.name || "Admin",
-          comment: `Admin updated campaign for ${brandName} (${form.asset_code}): window ${form.start_date} to ${form.end_date}, salesperson: ${form.salesperson_name || "Unassigned"}`,
+          comment: `Admin updated campaign for ${brandName} (assets: ${assetList}): window ${form.start_date} to ${form.end_date}, salesperson: ${form.salesperson_name || "Unassigned"}`,
           created_at: new Date().toISOString(),
         });
 
@@ -268,8 +279,9 @@ export default function CampaignFormDialog({
 
         const payload = {
           id: newCampaignId,
-          asset_id: form.asset_id,
-          asset_code: form.asset_code,
+          asset_id: primaryAsset.id,
+          asset_code: primaryAsset.code,
+          extra_assets: extraAssets,
           brand: brandName,
           brand_id: form.brand_id || null,
           salesperson_id: form.salesperson_id || null,
@@ -288,25 +300,23 @@ export default function CampaignFormDialog({
         const { error } = await supabase.from("campaigns").insert(payload);
         if (error) throw { body: { detail: error.message } };
 
-        // Sync asset state
+        // Sync primary asset state
         if (["live", "onboarding"].includes(form.stage)) {
           await supabase
             .from("assets")
-            .update({
-              status: form.stage === "live" ? "live" : "onboarding",
-              current_brand: brandName,
-            })
-            .eq("id", form.asset_id);
+            .update({ status: form.stage === "live" ? "live" : "onboarding", current_brand: brandName })
+            .eq("id", primaryAsset.id);
         }
 
         // Audit log
+        const assetList = validAssets.map((a) => a.code).join(", ");
         await supabase.from("audit_logs").insert({
           id: crypto.randomUUID(),
           entity_type: "campaign",
           entity_id: newCampaignId,
           action: "campaign_created_by_admin",
           actor_name: me?.name || "Admin",
-          comment: `Admin directly added campaign for ${brandName} on asset ${form.asset_code} (${form.start_date} to ${form.end_date})`,
+          comment: `Admin directly added campaign for ${brandName} on assets: ${assetList} (${form.start_date} to ${form.end_date})`,
           created_at: new Date().toISOString(),
         });
 
@@ -414,7 +424,15 @@ export default function CampaignFormDialog({
                 onValueChange={handleSalespersonChange}
               >
                 <SelectTrigger id="camp-salesperson" className="w-full" data-testid="campaign-salesperson-select">
-                  <SelectValue placeholder="Select sales person" />
+                  <SelectValue>
+                    {(() => {
+                      if (!form.salesperson_id) return "-- Unassigned --";
+                      const u = users.find((u) => u.id === form.salesperson_id);
+                      return u
+                        ? `${u.name} (${u.role || "sales"}${u.email ? ` · ${u.email}` : ""})`
+                        : form.salesperson_name || "-- Unassigned --";
+                    })()}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="unassigned">-- Unassigned --</SelectItem>
@@ -443,7 +461,15 @@ export default function CampaignFormDialog({
                   onValueChange={handleBrandSelect}
                 >
                   <SelectTrigger id="camp-brand" className="w-full" data-testid="campaign-brand-select">
-                    <SelectValue placeholder="Choose a brand or enter custom" />
+                    <SelectValue>
+                      {(() => {
+                        if (isCustomBrand) return `Custom: ${form.brand || form.custom_brand || "Enter below"}`;
+                        const b = brands.find((b) => b.id === form.brand_id);
+                        if (b) return b.name;
+                        if (form.brand) return `Custom: ${form.brand}`;
+                        return "Choose a brand or enter custom";
+                      })()}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="custom">+ Enter custom brand name...</SelectItem>
@@ -476,31 +502,78 @@ export default function CampaignFormDialog({
             </div>
           </div>
 
-          {/* 4. ASSOCIATE ASSETS */}
+          {/* 4. ASSOCIATE ASSETS (multi) */}
           <div className="rounded-lg border border-border/70 bg-secondary/20 p-3.5 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-foreground uppercase tracking-wider">
-              <Monitor className="size-3.5 text-primary" />
-              4. Associate Asset
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-semibold text-foreground uppercase tracking-wider">
+                <Monitor className="size-3.5 text-primary" />
+                4. Associate Assets
+              </div>
+              <Badge variant="outline" className="text-[10px]">
+                {assetRows.filter((r) => r.id).length} selected
+              </Badge>
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="camp-asset" className="text-xs">Select Asset / Display *</Label>
-              <Select
-                value={form.asset_id}
-                onValueChange={handleAssetSelect}
+            <div className="space-y-2">
+              {assetRows.map((row, idx) => {
+                const currentAsset = assets.find((a) => a.id === row.id);
+                const assetLabel = currentAsset
+                  ? `${currentAsset.asset_code} — ${currentAsset.location_name || "Location"} (${currentAsset.status})`
+                  : row.id
+                  ? (row.code || "Unknown asset")
+                  : "Select media asset...";
+
+                return (
+                  <div key={idx} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Select
+                        value={row.id || ""}
+                        onValueChange={(val) => handleAssetSelect(idx, val)}
+                      >
+                        <SelectTrigger className="w-full" data-testid={`campaign-asset-select-${idx}`}>
+                          <SelectValue>{assetLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent className="max-h-60">
+                          {assets
+                            .filter((a) => a.id === row.id || !selectedAssetIds.includes(a.id))
+                            .map((a) => (
+                              <SelectItem key={a.id} value={a.id} data-testid={`asset-opt-${a.id}`}>
+                                {a.asset_code} — {a.location_name || "Location"} ({a.status})
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {assetRows.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeAssetRow(idx)}
+                        className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+                        title="Remove asset"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={addAssetRow}
+                className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-medium transition-colors cursor-pointer mt-1"
+                data-testid="add-asset-row-button"
               >
-                <SelectTrigger id="camp-asset" className="w-full" data-testid="campaign-asset-select">
-                  <SelectValue placeholder="Select media asset..." />
-                </SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {assets.map((a) => (
-                    <SelectItem key={a.id} value={a.id} data-testid={`asset-opt-${a.id}`}>
-                      {a.asset_code} — {a.location_name || "Location"} ({a.status})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <Plus className="size-3.5" />
+                Add another asset
+              </button>
             </div>
+
+            {assetRows.length > 1 && (
+              <p className="text-[11px] text-muted-foreground">
+                The first asset is the <span className="font-semibold text-foreground">primary asset</span>. Additional assets are associated references.
+              </p>
+            )}
           </div>
 
           {/* STAGE & PRIORITY */}

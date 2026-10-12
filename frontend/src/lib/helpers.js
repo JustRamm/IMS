@@ -1010,7 +1010,7 @@ export function getAppBaseUrl() {
       return origin;
     }
   }
-  return import.meta.env.VITE_SITE_URL || "https://cand-l6wcj7coe-justramms-projects.vercel.app";
+  return import.meta.env.VITE_SITE_URL || "https://ims-bice-five.vercel.app";
 }
 
 export const STAGE_LABELS = {

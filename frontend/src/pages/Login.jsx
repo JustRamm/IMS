@@ -26,10 +26,10 @@ import {
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
 import { beginSession } from "@/lib/session";
-import { useMe } from "@/lib/queries";
 import sound from "@/lib/sound";
 import Skeleton from "@/components/skeletons/Skeleton";
 import { cn } from "@/lib/utils";
+import { getAppBaseUrl } from "@/lib/helpers";
 
 
 const ROLES = [
@@ -218,6 +218,7 @@ export default function Login({ initialMode }) {
         email: cleanEmail,
         password,
         options: {
+          emailRedirectTo: `${getAppBaseUrl()}/login`,
           data: {
             name: assignedName,
             role: assignedRole,
@@ -298,7 +299,7 @@ export default function Login({ initialMode }) {
         );
       }
 
-      const redirectUrl = `${window.location.origin}/login?mode=reset`;
+      const redirectUrl = `${getAppBaseUrl()}/login?mode=reset`;
       const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
         redirectTo: redirectUrl,
       });

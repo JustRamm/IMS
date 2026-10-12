@@ -1,5 +1,6 @@
 import path from "node:path";
-import { defineConfig } from "vite";
+import fs from "node:fs";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { visualEdits } from "@emergentbase/visual-edits/vite";
@@ -17,8 +18,26 @@ if (!hotReloadDisabled) {
   process.env.CHOKIDAR_USEPOLLING = "true";
 }
 
+// Read local .env if available
+let localResendKey = "";
+for (const p of [
+  path.resolve(process.cwd(), "frontend/.env"),
+  path.resolve(process.cwd(), ".env"),
+]) {
+  try {
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, "utf8");
+      const match = raw.match(/VITE_RESEND_API_KEY=(.*)/);
+      if (match) {
+        localResendKey = match[1].trim();
+        break;
+      }
+    }
+  } catch {}
+}
+
 // Local dev handler for /api/send-email
-function resendLocalPlugin() {
+function resendLocalPlugin(env) {
   return {
     name: "resend-local-api",
     configureServer(server) {
@@ -42,7 +61,7 @@ function resendLocalPlugin() {
         req.on("end", async () => {
           try {
             const parsed = JSON.parse(body || "{}");
-            const apiKey = process.env.VITE_RESEND_API_KEY || "";
+            const apiKey = env.VITE_RESEND_API_KEY || process.env.VITE_RESEND_API_KEY || localResendKey;
             const resendRes = await fetch("https://api.resend.com/emails", {
               method: "POST",
               headers: {
@@ -72,19 +91,24 @@ function resendLocalPlugin() {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [
-    react(),
-    tailwindcss(),
-    resendLocalPlugin(),
-    ...(visualEditsDisabled ? [] : [visualEdits()]),
-  ],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+export default defineConfig(({ mode }) => {
+  const env = {
+    ...loadEnv(mode, process.cwd(), ""),
+    ...loadEnv(mode, __dirname, ""),
+  };
+  return {
+    plugins: [
+      react(),
+      tailwindcss(),
+      resendLocalPlugin(env),
+      ...(visualEditsDisabled ? [] : [visualEdits()]),
+    ],
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
+      },
+      dedupe: ["react", "react-dom", "react-dom/client", "react-router-dom", "react-is"],
     },
-    dedupe: ["react", "react-dom", "react-dom/client", "react-router-dom", "react-is"],
-  },
   // Every shipped dep, pre-bundled up front. Vite discovers deps lazily, so the first
   // import outside the initial graph would trigger a re-optimize + reload mid-session.
   optimizeDeps: {
@@ -135,4 +159,6 @@ export default defineConfig({
         },
     // No /api proxy: all data comes from Supabase directly via the SDK.
   },
+};
 });
+
