@@ -167,23 +167,56 @@ export async function sendClientPortalEmail({
 </html>
 `;
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-    },
-    body: JSON.stringify({
-      from: "Carbon & Whale IMS <onboarding@resend.dev>",
-      to: [to.trim().toLowerCase()],
-      subject: `Ad Campaign Verification & Proof of Performance — ${brandName || "Carbon & Whale"}`,
-      html: emailHtml,
-    }),
-  });
+  let response;
+  try {
+    response = await fetch("/api/send-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "Carbon & Whale IMS <onboarding@resend.dev>",
+        to: [to.trim().toLowerCase()],
+        subject: `Ad Campaign Verification & Proof of Performance — ${brandName || "Carbon & Whale"}`,
+        html: emailHtml,
+      }),
+    });
+  } catch {
+    // Fallback in case /api/send-email is unreachable directly
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: "Carbon & Whale IMS <onboarding@resend.dev>",
+        to: [to.trim().toLowerCase()],
+        subject: `Ad Campaign Verification & Proof of Performance — ${brandName || "Carbon & Whale"}`,
+        html: emailHtml,
+      }),
+    });
+  }
 
-  const resData = await response.json();
+  const resData = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(resData?.message || resData?.error?.message || "Failed to send notification email via Resend.");
+    const errorMsg =
+      resData?.message ||
+      resData?.error?.message ||
+      resData?.error ||
+      "Failed to send notification email via Resend.";
+
+    if (
+      typeof errorMsg === "string" &&
+      (errorMsg.includes("testing emails to your own email address") ||
+        errorMsg.includes("verify a domain"))
+    ) {
+      throw new Error(
+        "Resend Sandbox Mode: Resend currently only allows sending test emails to marketing@carbonandwhale.com. To send to external clients, please verify your domain at resend.com/domains."
+      );
+    }
+
+    throw new Error(errorMsg);
   }
 
   return resData;
