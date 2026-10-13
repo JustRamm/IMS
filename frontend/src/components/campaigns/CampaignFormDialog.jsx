@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Calendar, User, Briefcase, Monitor, Plus, Edit, X } from "lucide-react";
+import { Calendar, User, Briefcase, Monitor, Plus, Edit, X, Search, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,7 @@ import { queryClient } from "@/lib/queryClient";
 import { useUsers, useBrands, useAssets, useMe } from "@/lib/queries";
 import { promoteNextWaitlistOrFreeAsset } from "@/lib/realtime";
 import { errMessage } from "@/lib/helpers";
+import { cn } from "@/lib/utils";
 
 /** Convert legacy single asset_id/asset_code into the multi-asset array format */
 function normaliseCampaignAssets(campaign) {
@@ -84,7 +86,9 @@ export default function CampaignFormDialog({
     priority: "high",
   });
 
-  const [assetRows, setAssetRows] = useState([{ id: "", code: "" }]);
+  const [selectedAssets, setSelectedAssets] = useState([]);
+  const [assetSearchQuery, setAssetSearchQuery] = useState("");
+  const [assetFilterTab, setAssetFilterTab] = useState("all");
   const [isCustomBrand, setIsCustomBrand] = useState(false);
 
   // Sync form when opening or campaign changes
@@ -105,7 +109,7 @@ export default function CampaignFormDialog({
         priority: campaign.priority || "high",
       });
       const existingAssets = normaliseCampaignAssets(campaign);
-      setAssetRows(existingAssets.length > 0 ? existingAssets : [{ id: "", code: "" }]);
+      setSelectedAssets(existingAssets);
       // Check if brand exists in brands list
       const matchedBrand = brands.find((b) => b.id === campaign.brand_id || b.name?.toLowerCase() === campaign.brand?.toLowerCase());
       setIsCustomBrand(!matchedBrand && Boolean(campaign.brand));
@@ -122,9 +126,11 @@ export default function CampaignFormDialog({
         stage: "onboarding",
         priority: "high",
       });
-      setAssetRows([{ id: "", code: "" }]);
+      setSelectedAssets([]);
       setIsCustomBrand(false);
     }
+    setAssetSearchQuery("");
+    setAssetFilterTab("all");
   }, [open, campaign, brands, me]);
 
   // Recalculate duration when dates change
@@ -195,28 +201,120 @@ export default function CampaignFormDialog({
     }));
   };
 
-  const handleAssetSelect = (idx, assetId) => {
-    const selected = assets.find((a) => a.id === assetId);
-    setAssetRows((rows) =>
-      rows.map((row, i) => (i === idx ? { id: assetId, code: selected?.asset_code || "" } : row))
-    );
+  const selectedAssetIds = useMemo(
+    () => new Set(selectedAssets.map((a) => a.id).filter(Boolean)),
+    [selectedAssets],
+  );
+
+  const handleToggleAsset = (assetId, assetCode) => {
+    setSelectedAssets((prev) => {
+      if (prev.some((a) => a.id === assetId)) {
+        return prev.filter((a) => a.id !== assetId);
+      }
+      return [...prev, { id: assetId, code: assetCode || "" }];
+    });
   };
 
-  const addAssetRow = () => setAssetRows((rows) => [...rows, { id: "", code: "" }]);
-  const removeAssetRow = (idx) => setAssetRows((rows) => rows.filter((_, i) => i !== idx));
-  const selectedAssetIds = assetRows.map((r) => r.id).filter(Boolean);
+  const handleMakePrimaryAsset = (assetId) => {
+    setSelectedAssets((prev) => {
+      const idx = prev.findIndex((a) => a.id === assetId);
+      if (idx <= 0) return prev;
+      const target = prev[idx];
+      const rest = prev.filter((a) => a.id !== assetId);
+      return [target, ...rest];
+    });
+  };
+
+  const handleRemoveAsset = (assetId) => {
+    setSelectedAssets((prev) => prev.filter((a) => a.id !== assetId));
+  };
+
+  const handleClearAllAssets = () => {
+    setSelectedAssets([]);
+  };
+
+  const filteredAssets = useMemo(() => {
+    const q = assetSearchQuery.trim().toLowerCase();
+    return assets.filter((a) => {
+      if (assetFilterTab === "available" && a.status !== "available" && !selectedAssetIds.has(a.id)) {
+        return false;
+      }
+      if (assetFilterTab === "selected" && !selectedAssetIds.has(a.id)) {
+        return false;
+      }
+      if (!q) return true;
+      const codeMatch = (a.asset_code || "").toLowerCase().includes(q);
+      const locMatch = (a.location_name || "").toLowerCase().includes(q);
+      const typeMatch = (a.asset_type || "").toLowerCase().includes(q);
+      return codeMatch || locMatch || typeMatch;
+    });
+  }, [assets, assetSearchQuery, assetFilterTab, selectedAssetIds]);
+
+  const availableCount = useMemo(
+    () => assets.filter((a) => a.status === "available").length,
+    [assets],
+  );
+
+  const areAllFilteredSelected = useMemo(() => {
+    if (filteredAssets.length === 0) return false;
+    return filteredAssets.every((a) => selectedAssetIds.has(a.id));
+  }, [filteredAssets, selectedAssetIds]);
+
+  const handleSelectAllMatching = () => {
+    const toAdd = filteredAssets
+      .filter((a) => !selectedAssetIds.has(a.id))
+      .map((a) => ({ id: a.id, code: a.asset_code || "" }));
+    setSelectedAssets((prev) => [...prev, ...toAdd]);
+  };
+
+  const handleDeselectAllMatching = () => {
+    const matchingIds = new Set(filteredAssets.map((a) => a.id));
+    setSelectedAssets((prev) => prev.filter((a) => !matchingIds.has(a.id)));
+  };
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const brandName = isCustomBrand ? form.custom_brand.trim() : form.brand.trim();
       if (!brandName) throw new Error("Brand name is required");
-      const validAssets = assetRows.filter((r) => r.id);
+      const validAssets = selectedAssets.filter((r) => r.id);
       if (validAssets.length === 0) throw new Error("At least one associated asset is required");
       if (!form.start_date || !form.end_date) throw new Error("Campaign start and end dates are required");
+
+      // Auto-resolve or permanently create brand record in brands directory
+      let resolvedBrandId = form.brand_id || null;
+      if (!resolvedBrandId || isCustomBrand) {
+        const { data: existingBrand } = await supabase
+          .from("brands")
+          .select("id, name")
+          .ilike("name", brandName)
+          .maybeSingle();
+
+        if (existingBrand?.id) {
+          resolvedBrandId = existingBrand.id;
+        } else {
+          const newBrandId = crypto.randomUUID();
+          const { data: createdBrand, error: brandInsertErr } = await supabase
+            .from("brands")
+            .insert({
+              id: newBrandId,
+              name: brandName,
+              created_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+
+          if (!brandInsertErr && createdBrand?.id) {
+            resolvedBrandId = createdBrand.id;
+          } else if (!brandInsertErr) {
+            resolvedBrandId = newBrandId;
+          }
+        }
+      }
 
       const finalDuration = Number(form.duration_days) || Math.max(1, Math.round((new Date(form.end_date) - new Date(form.start_date)) / (1000 * 60 * 60 * 24)));
       const primaryAsset = validAssets[0];
       const extraAssets = validAssets.slice(1);
+      const allAssetIds = validAssets.map((a) => a.id);
 
       if (isEdit) {
         // --- EDIT CAMPAIGN ---
@@ -225,7 +323,7 @@ export default function CampaignFormDialog({
           asset_code: primaryAsset.code,
           extra_assets: extraAssets,
           brand: brandName,
-          brand_id: form.brand_id || null,
+          brand_id: resolvedBrandId,
           salesperson_id: form.salesperson_id || null,
           salesperson_name: form.salesperson_name || null,
           start_date: form.start_date,
@@ -238,20 +336,45 @@ export default function CampaignFormDialog({
         const { error } = await supabase.from("campaigns").update(updates).eq("id", campaign.id);
         if (error) throw { body: { detail: error.message } };
 
-        // If asset changed, update previous & new asset
-        if (campaign.asset_id && campaign.asset_id !== primaryAsset.id) {
-          await promoteNextWaitlistOrFreeAsset(campaign.asset_id, campaign.asset_code);
-          if (["live", "onboarding"].includes(form.stage)) {
-            await supabase
-              .from("assets")
-              .update({ status: form.stage === "live" ? "live" : "onboarding", current_brand: brandName })
-              .eq("id", primaryAsset.id);
+        // Identify any assets removed from the campaign and free them
+        const oldAssets = normaliseCampaignAssets(campaign);
+        const oldAssetIds = oldAssets.map((a) => a.id);
+        const removedAssetIds = oldAssetIds.filter((id) => !allAssetIds.includes(id));
+
+        for (const remId of removedAssetIds) {
+          const remAsset = oldAssets.find((a) => a.id === remId);
+          try {
+            await promoteNextWaitlistOrFreeAsset(remId, remAsset?.code || "");
+          } catch (e) {
+            console.warn("Could not free removed asset:", e);
           }
-        } else if (["live", "onboarding"].includes(form.stage)) {
+        }
+
+        // Sync all valid assets to match campaign stage
+        if (form.stage === "closed") {
+          for (const a of validAssets) {
+            try {
+              await promoteNextWaitlistOrFreeAsset(a.id, a.code);
+            } catch (e) {
+              console.warn("Could not free asset:", e);
+            }
+          }
+        } else if (form.stage === "closing") {
           await supabase
             .from("assets")
-            .update({ status: form.stage === "live" ? "live" : "onboarding", current_brand: brandName })
-            .eq("id", primaryAsset.id);
+            .update({ status: "closing" })
+            .in("id", allAssetIds);
+        } else if (["live", "onboarding", "invoicing"].includes(form.stage)) {
+          const targetStatus = form.stage === "live" ? "live" : "onboarding";
+          await supabase
+            .from("assets")
+            .update({
+              status: targetStatus,
+              current_brand: brandName,
+              start_date: form.start_date,
+              end_date: form.end_date,
+            })
+            .in("id", allAssetIds);
         }
 
         // Audit log
@@ -266,7 +389,7 @@ export default function CampaignFormDialog({
           created_at: new Date().toISOString(),
         });
 
-        return { id: campaign.id, isEdit: true };
+        return { id: campaign.id, brand_id: resolvedBrandId, isEdit: true };
       } else {
         // --- ADD CAMPAIGN ---
         const newCampaignId = crypto.randomUUID();
@@ -283,7 +406,7 @@ export default function CampaignFormDialog({
           asset_code: primaryAsset.code,
           extra_assets: extraAssets,
           brand: brandName,
-          brand_id: form.brand_id || null,
+          brand_id: resolvedBrandId,
           salesperson_id: form.salesperson_id || null,
           salesperson_name: form.salesperson_name || null,
           start_date: form.start_date,
@@ -300,12 +423,31 @@ export default function CampaignFormDialog({
         const { error } = await supabase.from("campaigns").insert(payload);
         if (error) throw { body: { detail: error.message } };
 
-        // Sync primary asset state
-        if (["live", "onboarding"].includes(form.stage)) {
+        // Sync all valid assets state
+        if (form.stage === "closed") {
+          for (const a of validAssets) {
+            try {
+              await promoteNextWaitlistOrFreeAsset(a.id, a.code);
+            } catch (e) {
+              console.warn("Could not free asset:", e);
+            }
+          }
+        } else if (form.stage === "closing") {
           await supabase
             .from("assets")
-            .update({ status: form.stage === "live" ? "live" : "onboarding", current_brand: brandName })
-            .eq("id", primaryAsset.id);
+            .update({ status: "closing" })
+            .in("id", allAssetIds);
+        } else if (["live", "onboarding", "invoicing"].includes(form.stage)) {
+          const targetStatus = form.stage === "live" ? "live" : "onboarding";
+          await supabase
+            .from("assets")
+            .update({
+              status: targetStatus,
+              current_brand: brandName,
+              start_date: form.start_date,
+              end_date: form.end_date,
+            })
+            .in("id", allAssetIds);
         }
 
         // Audit log
@@ -320,7 +462,7 @@ export default function CampaignFormDialog({
           created_at: new Date().toISOString(),
         });
 
-        return { id: newCampaignId, isEdit: false };
+        return { id: newCampaignId, brand_id: resolvedBrandId, isEdit: false };
       }
     },
     onSuccess: (res) => {
@@ -329,6 +471,8 @@ export default function CampaignFormDialog({
       queryClient.invalidateQueries({ queryKey: ["assets"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["audit"] });
+      queryClient.invalidateQueries({ queryKey: ["brands"] });
+      if (res.brand_id) queryClient.invalidateQueries({ queryKey: ["brand", res.brand_id] });
 
       toast.success(res.isEdit ? "Campaign updated successfully" : "Campaign created successfully");
       setOpen(false);
@@ -502,78 +646,248 @@ export default function CampaignFormDialog({
             </div>
           </div>
 
-          {/* 4. ASSOCIATE ASSETS (multi) */}
+          {/* 4. ASSOCIATE ASSETS (searchable checkbox multi-select) */}
           <div className="rounded-lg border border-border/70 bg-secondary/20 p-3.5 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs font-semibold text-foreground uppercase tracking-wider">
                 <Monitor className="size-3.5 text-primary" />
                 4. Associate Assets
               </div>
-              <Badge variant="outline" className="text-[10px]">
-                {assetRows.filter((r) => r.id).length} selected
+              <Badge variant="outline" className="text-[10px]" data-testid="campaign-selected-assets-count">
+                {selectedAssets.length} selected
               </Badge>
             </div>
 
+            {/* Selected assets chips rack */}
+            {selectedAssets.length > 0 && (
+              <div className="space-y-1.5 p-2 rounded-md bg-background/70 border border-border/60">
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span className="font-medium">Selected Assets ({selectedAssets.length}) · First is Primary:</span>
+                  <button
+                    type="button"
+                    onClick={handleClearAllAssets}
+                    className="text-[11px] text-muted-foreground hover:text-red-500 transition-colors cursor-pointer"
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-0.5">
+                  {selectedAssets.map((sel, idx) => {
+                    const isPrimary = idx === 0;
+                    return (
+                      <Badge
+                        key={sel.id}
+                        variant={isPrimary ? "default" : "secondary"}
+                        className={cn(
+                          "pl-2 pr-1.5 py-0.5 text-xs font-mono flex items-center gap-1.5 group transition-all",
+                          isPrimary
+                            ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                            : "bg-secondary text-foreground hover:bg-secondary/80 border border-border/60"
+                        )}
+                        data-testid={`selected-asset-chip-${sel.code}`}
+                      >
+                        {isPrimary && (
+                          <span className="text-[9px] uppercase tracking-wider bg-white/20 dark:bg-black/20 px-1 py-0.2 rounded font-sans font-bold">
+                            Primary
+                          </span>
+                        )}
+                        <span>{sel.code || "Asset"}</span>
+                        {!isPrimary && (
+                          <button
+                            type="button"
+                            onClick={() => handleMakePrimaryAsset(sel.id)}
+                            className="text-[10px] text-primary/80 hover:text-primary hover:underline font-sans cursor-pointer transition-colors"
+                            title="Set as Primary Asset"
+                          >
+                            (set primary)
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAsset(sel.id)}
+                          className="rounded-full p-0.5 hover:bg-black/15 dark:hover:bg-white/15 transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+                          title="Remove asset"
+                          data-testid={`remove-asset-${sel.code}`}
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Search & Filter Bar */}
             <div className="space-y-2">
-              {assetRows.map((row, idx) => {
-                const currentAsset = assets.find((a) => a.id === row.id);
-                const assetLabel = currentAsset
-                  ? `${currentAsset.asset_code} — ${currentAsset.location_name || "Location"} (${currentAsset.status})`
-                  : row.id
-                  ? (row.code || "Unknown asset")
-                  : "Select media asset...";
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  type="text"
+                  placeholder="Search assets by code (e.g. CSQK-B1, DA), location, or type..."
+                  value={assetSearchQuery}
+                  onChange={(e) => setAssetSearchQuery(e.target.value)}
+                  className="pl-8 pr-8 text-xs h-8.5"
+                  data-testid="asset-search-input"
+                />
+                {assetSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setAssetSearchQuery("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
 
-                return (
-                  <div key={idx} className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <Select
-                        value={row.id || ""}
-                        onValueChange={(val) => handleAssetSelect(idx, val)}
-                      >
-                        <SelectTrigger className="w-full" data-testid={`campaign-asset-select-${idx}`}>
-                          <SelectValue>{assetLabel}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent className="max-h-60">
-                          {assets
-                            .filter((a) => a.id === row.id || !selectedAssetIds.includes(a.id))
-                            .map((a) => (
-                              <SelectItem key={a.id} value={a.id} data-testid={`asset-opt-${a.id}`}>
-                                {a.asset_code} — {a.location_name || "Location"} ({a.status})
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {assetRows.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeAssetRow(idx)}
-                        className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
-                        title="Remove asset"
-                      >
-                        <X className="size-4" />
-                      </button>
+              <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setAssetFilterTab("all")}
+                    className={cn(
+                      "px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer",
+                      assetFilterTab === "all"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary/60 text-muted-foreground hover:text-foreground"
                     )}
-                  </div>
-                );
-              })}
+                  >
+                    All ({assets.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssetFilterTab("available")}
+                    className={cn(
+                      "px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer",
+                      assetFilterTab === "available"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary/60 text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Available ({availableCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssetFilterTab("selected")}
+                    className={cn(
+                      "px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer",
+                      assetFilterTab === "selected"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary/60 text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Selected ({selectedAssets.length})
+                  </button>
+                </div>
 
-              <button
-                type="button"
-                onClick={addAssetRow}
-                className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-medium transition-colors cursor-pointer mt-1"
-                data-testid="add-asset-row-button"
-              >
-                <Plus className="size-3.5" />
-                Add another asset
-              </button>
+                {filteredAssets.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={areAllFilteredSelected ? handleDeselectAllMatching : handleSelectAllMatching}
+                    className="text-[11px] text-primary hover:underline font-medium cursor-pointer transition-colors"
+                    data-testid="toggle-select-all-matching-btn"
+                  >
+                    {areAllFilteredSelected
+                      ? `Deselect all in view (${filteredAssets.length})`
+                      : `Select all in view (${filteredAssets.length})`}
+                  </button>
+                )}
+              </div>
             </div>
 
-            {assetRows.length > 1 && (
-              <p className="text-[11px] text-muted-foreground">
-                The first asset is the <span className="font-semibold text-foreground">primary asset</span>. Additional assets are associated references.
-              </p>
-            )}
+            {/* Scrollable Checkbox List */}
+            <div
+              className="max-h-56 sm:max-h-64 overflow-y-auto rounded-md border border-border/60 bg-background/50 divide-y divide-border/30"
+              data-testid="asset-checkbox-list"
+            >
+              {filteredAssets.length === 0 ? (
+                <div className="p-6 text-center text-xs text-muted-foreground space-y-1">
+                  <p>No assets found{assetSearchQuery ? ` matching "${assetSearchQuery}"` : ""}.</p>
+                  {(assetSearchQuery || assetFilterTab !== "all") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssetSearchQuery("");
+                        setAssetFilterTab("all");
+                      }}
+                      className="text-primary hover:underline text-[11px] cursor-pointer"
+                    >
+                      Clear search and filters
+                    </button>
+                  )}
+                </div>
+              ) : (
+                filteredAssets.map((asset) => {
+                  const isSelected = selectedAssetIds.has(asset.id);
+                  const isPrimary = selectedAssets[0]?.id === asset.id;
+
+                  return (
+                    <div
+                      key={asset.id}
+                      onClick={() => handleToggleAsset(asset.id, asset.asset_code)}
+                      className={cn(
+                        "flex items-center gap-3 p-2.5 transition-colors cursor-pointer select-none text-xs",
+                        isSelected ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-secondary/40"
+                      )}
+                      data-testid={`asset-checkbox-row-${asset.asset_code}`}
+                    >
+                      <Checkbox
+                        id={`asset-chk-${asset.id}`}
+                        checked={isSelected}
+                        onCheckedChange={() => handleToggleAsset(asset.id, asset.asset_code)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <label
+                            htmlFor={`asset-chk-${asset.id}`}
+                            className="font-mono font-semibold text-foreground text-xs cursor-pointer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {asset.asset_code}
+                          </label>
+                          {isPrimary && (
+                            <Badge variant="default" className="text-[9px] px-1 py-0 h-4 bg-primary text-primary-foreground font-semibold">
+                              Primary
+                            </Badge>
+                          )}
+                          {isSelected && !isPrimary && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-primary/40 text-primary">
+                              Included
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground truncate mt-0.5">
+                          <span className="truncate">{asset.location_name || "Location unassigned"}</span>
+                          {asset.asset_type && <span>· {asset.asset_type}</span>}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium capitalize",
+                            asset.status === "available" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
+                            asset.status === "live" && "bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20",
+                            asset.status === "onboarding" && "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20",
+                            asset.status === "reserved" && "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20",
+                            asset.status === "closing" && "bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20",
+                            !["available", "live", "onboarding", "reserved", "closing"].includes(asset.status) && "bg-secondary text-muted-foreground"
+                          )}
+                        >
+                          {asset.status || "available"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <p className="text-[11px] text-muted-foreground">
+              Tip: The first selected asset acts as the <span className="font-semibold text-foreground">primary asset</span>. Click <span className="italic">(set primary)</span> to change it. All selected assets will go live together with this campaign.
+            </p>
           </div>
 
           {/* STAGE & PRIORITY */}

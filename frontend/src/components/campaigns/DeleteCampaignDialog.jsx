@@ -43,16 +43,24 @@ export default function DeleteCampaignDialog({
       const { error } = await supabase.from("campaigns").delete().eq("id", campaign.id);
       if (error) throw { body: { detail: error.message } };
 
-      // 2. Free associated asset if requested
-      if (freeAsset && campaign.asset_id) {
-        try {
-          await promoteNextWaitlistOrFreeAsset(campaign.asset_id, campaign.asset_code);
-        } catch (e) {
-          console.warn("Could not auto-promote/free asset:", e);
+      // 2. Free associated assets if requested
+      const allCampaignAssets = [
+        { id: campaign.asset_id, code: campaign.asset_code },
+        ...(Array.isArray(campaign.extra_assets) ? campaign.extra_assets : []),
+      ].filter((a) => a?.id);
+
+      if (freeAsset) {
+        for (const a of allCampaignAssets) {
+          try {
+            await promoteNextWaitlistOrFreeAsset(a.id, a.code);
+          } catch (e) {
+            console.warn("Could not auto-promote/free asset:", e);
+          }
         }
       }
 
       // 3. Log audit event
+      const allCodes = allCampaignAssets.map((a) => a.code).filter(Boolean).join(", ") || campaign.asset_code;
       try {
         await supabase.from("audit_logs").insert({
           id: crypto.randomUUID(),
@@ -60,14 +68,14 @@ export default function DeleteCampaignDialog({
           entity_id: campaign.id,
           action: "campaign_deleted_by_admin",
           actor_name: me?.name || "Admin",
-          comment: `Admin deleted campaign for brand "${campaign.brand}" on asset ${campaign.asset_code} (Dates: ${campaign.start_date || "N/A"} to ${campaign.end_date || "N/A"})`,
+          comment: `Admin deleted campaign for brand "${campaign.brand}" on assets ${allCodes} (Dates: ${campaign.start_date || "N/A"} to ${campaign.end_date || "N/A"})`,
           created_at: new Date().toISOString(),
         });
       } catch (e) {
         console.warn("Could not insert audit log:", e);
       }
 
-      return { id: campaign.id, asset_code: campaign.asset_code, brand: campaign.brand };
+      return { id: campaign.id, asset_code: allCodes, brand: campaign.brand };
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
@@ -86,6 +94,12 @@ export default function DeleteCampaignDialog({
   });
 
   if (!campaign) return null;
+
+  const allCampaignAssets = [
+    { id: campaign.asset_id, code: campaign.asset_code },
+    ...(Array.isArray(campaign.extra_assets) ? campaign.extra_assets : []),
+  ].filter((a) => a?.id);
+  const allAssetCodes = allCampaignAssets.map((a) => a.code).filter(Boolean).join(", ") || campaign.asset_code;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -107,8 +121,8 @@ export default function DeleteCampaignDialog({
             <span className="font-semibold text-foreground">{campaign.brand}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Asset:</span>
-            <span className="font-mono font-medium text-foreground">{campaign.asset_code}</span>
+            <span className="text-muted-foreground">{allCampaignAssets.length > 1 ? "Assets:" : "Asset:"}</span>
+            <span className="font-mono font-medium text-foreground">{allAssetCodes}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Window:</span>
@@ -133,7 +147,7 @@ export default function DeleteCampaignDialog({
             onCheckedChange={(chk) => setFreeAsset(Boolean(chk))}
           />
           <Label htmlFor="free-asset-checkbox" className="text-xs cursor-pointer">
-            Free associated asset ({campaign.asset_code}) and promote waitlist
+            Free associated asset(s) ({allAssetCodes}) and promote waitlist
           </Label>
         </div>
 

@@ -164,7 +164,10 @@ export default function Campaigns() {
                           <p className="mono-label mt-0.5 truncate text-[10px] text-muted-foreground sm:text-xs">
                             {c.asset_code}
                             {Array.isArray(c.extra_assets) && c.extra_assets.length > 0 && (
-                              <span className="ml-1 text-[9px] text-primary/80 font-medium">
+                              <span
+                                className="ml-1 text-[9px] text-primary/80 font-medium"
+                                title={`All assets: ${[c.asset_code, ...c.extra_assets.map((a) => a.code)].filter(Boolean).join(", ")}`}
+                              >
                                 +{c.extra_assets.length} more
                               </span>
                             )}
