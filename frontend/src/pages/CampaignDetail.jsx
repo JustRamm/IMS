@@ -400,7 +400,14 @@ function InvoiceDialog({ campaign }) {
 
       const { error } = await supabase.from("campaigns").update({ stage: "live", invoice, gtps, start_date: startDate, end_date: endDate }).eq("id", campaign.id);
       if (error) throw { body: { detail: error.message } };
-      await supabase.from("assets").update({ status: "live", current_brand: campaign.brand }).eq("id", campaign.asset_id);
+      const allAssetIds = [
+        campaign.asset_id,
+        ...(Array.isArray(campaign.extra_assets) ? campaign.extra_assets.map((a) => a.id) : []),
+      ].filter(Boolean);
+      await supabase
+        .from("assets")
+        .update({ status: "live", current_brand: campaign.brand, start_date: startDate, end_date: endDate })
+        .in("id", allAssetIds);
       return { ok: true };
     },
     onSuccess: () => {
@@ -735,8 +742,14 @@ function GtpCard({ campaign, gtp }) {
           created_at: new Date().toISOString(),
         });
 
-        // Release asset and auto-promote waitlist
-        await promoteNextWaitlistOrFreeAsset(c.asset_id || campaign.asset_id, c.asset_code || campaign.asset_code);
+        // Release all associated assets and auto-promote waitlist
+        const allAssetsToFree = [
+          { id: c.asset_id || campaign.asset_id, code: c.asset_code || campaign.asset_code },
+          ...(Array.isArray(c.extra_assets || campaign.extra_assets) ? (c.extra_assets || campaign.extra_assets) : []),
+        ].filter((a) => a?.id);
+        for (const a of allAssetsToFree) {
+          await promoteNextWaitlistOrFreeAsset(a.id, a.code);
+        }
         // notifyBrandAdStatusUpdate(campaign.id, "closed");
         assetFreed = true;
       } else {
@@ -952,9 +965,13 @@ function CancellationPanel({ campaign }) {
         const { data: existing } = await supabase.from("campaigns").select("gtps").eq("id", campaign.id).single();
         updates.gtps = [...(existing?.gtps ?? []), closureGtp];
 
-        // Mark the asset status as closing
-        if (campaign.asset_id || c?.asset_id) {
-          await supabase.from("assets").update({ status: "closing" }).eq("id", campaign.asset_id || c.asset_id);
+        // Mark all associated assets status as closing
+        const allClosingIds = [
+          campaign.asset_id || c?.asset_id,
+          ...(Array.isArray(campaign.extra_assets || c?.extra_assets) ? (campaign.extra_assets || c.extra_assets).map((a) => a.id) : []),
+        ].filter(Boolean);
+        if (allClosingIds.length > 0) {
+          await supabase.from("assets").update({ status: "closing" }).in("id", allClosingIds);
         }
       }
       const { error } = await supabase.from("campaigns").update(updates).eq("id", campaign.id);
@@ -1157,17 +1174,24 @@ export default function CampaignDetail() {
         created_at: new Date().toISOString(),
       });
 
-      // Free asset and auto-promote waitlist
-      await promoteNextWaitlistOrFreeAsset(campaign.asset_id, campaign.asset_code);
+      // Free all associated assets and auto-promote waitlist
+      const allAssetsToFree = [
+        { id: campaign.asset_id, code: campaign.asset_code },
+        ...(Array.isArray(campaign.extra_assets) ? campaign.extra_assets : []),
+      ].filter((a) => a?.id);
+
+      for (const a of allAssetsToFree) {
+        await promoteNextWaitlistOrFreeAsset(a.id, a.code);
+      }
 
       // Notify brand ad status
       // notifyBrandAdStatusUpdate(campaign.id, "closed");
 
-      return { ok: true };
+      return { ok: true, freedCodes: allAssetsToFree.map((a) => a.code).filter(Boolean).join(", ") || campaign.asset_code };
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       refresh();
-      toast.success(`Campaign closed! Asset ${campaign.asset_code} has been freed.`);
+      toast.success(`Campaign closed! Asset(s) ${res?.freedCodes || campaign.asset_code} have been freed.`);
     },
     onError: (err) => toast.error(errMessage(err, "Could not finalize campaign closure")),
   });
@@ -1186,7 +1210,11 @@ export default function CampaignDetail() {
   return (
     <AppShell
       title={campaign ? `${campaign.brand}` : "Campaign"}
-      subtitle={campaign ? `${campaign.asset_code} · ${campaign.duration_days} day campaign` : "Loading…"}
+      subtitle={
+        campaign
+          ? `${[campaign.asset_code, ...(Array.isArray(campaign.extra_assets) ? campaign.extra_assets.map((a) => a.code) : [])].filter(Boolean).join(", ")} · ${campaign.duration_days} day campaign`
+          : "Loading…"
+      }
       backTo="/campaigns"
       backLabel="Campaigns"
       backTestId="back-to-campaigns"

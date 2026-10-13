@@ -72,7 +72,7 @@ export function useDashboard(userProfile) {
         // Bug #20 fix: select only required columns for KPI calculation rather than all columns
         supabase.from("assets").select("id, status").then((r) => r, () => ({ data: [] })),
         supabase.from("queue_entries").select("*").in("state", ["active", "pending"]).then((r) => r, () => ({ data: [] })),
-        supabase.from("campaigns").select("id, brand, asset_id, asset_code, stage, invoice, gtps, checklist, cancellation, duration_days, start_date, end_date").neq("stage", "closed").then((r) => r, () => ({ data: [] })),
+        supabase.from("campaigns").select("id, brand, asset_id, asset_code, stage, invoice, gtps, checklist, cancellation, duration_days, start_date, end_date, extra_assets").neq("stage", "closed").then((r) => r, () => ({ data: [] })),
         supabase.from("settings").select("*").then((r) => r, () => ({ data: [] })),
         supabase.from("holidays").select("date").then((r) => r, () => ({ data: [] })),
       ]);
@@ -259,9 +259,7 @@ export function useAssets(params = {}) {
             ids.length
               ? supabase.from("queue_entries").select("asset_id").in("state", ["active", "pending"]).in("asset_id", ids)
               : Promise.resolve({ data: [] }),
-            ids.length
-              ? supabase.from("campaigns").select("asset_id,brand,stage,gtps,start_date,end_date").neq("stage", "closed").in("asset_id", ids)
-              : Promise.resolve({ data: [] }),
+            supabase.from("campaigns").select("asset_id,brand,stage,gtps,start_date,end_date,extra_assets").neq("stage", "closed"),
             resolveDocumentUrls(allPhotoIds),
           ]);
           queueCounts = qcRes.data ?? [];
@@ -278,21 +276,28 @@ export function useAssets(params = {}) {
         const liveMap = {};
         const gtpMap = {};
         for (const c of activeCampaigns ?? []) {
-          if (c.brand) {
-            if (liveMap[c.asset_id]) {
-              const parts = liveMap[c.asset_id].split(", ");
-              if (!parts.includes(c.brand)) {
-                liveMap[c.asset_id] = `${liveMap[c.asset_id]}, ${c.brand}`;
+          const cAssetIds = [
+            c.asset_id,
+            ...(Array.isArray(c.extra_assets) ? c.extra_assets.map((ea) => ea.id) : []),
+          ].filter(Boolean);
+
+          for (const aId of cAssetIds) {
+            if (c.brand) {
+              if (liveMap[aId]) {
+                const parts = liveMap[aId].split(", ");
+                if (!parts.includes(c.brand)) {
+                  liveMap[aId] = `${liveMap[aId]}, ${c.brand}`;
+                }
+              } else {
+                liveMap[aId] = c.brand;
               }
-            } else {
-              liveMap[c.asset_id] = c.brand;
             }
-          }
-          if (["live", "closing"].includes(c.stage)) {
-            const pending = (c.gtps ?? []).find((g) => ["pending", "rejected"].includes(g.status));
-            if (pending) {
-              const days = Math.ceil((new Date(pending.due_date) - new Date(today)) / 86400000);
-              gtpMap[c.asset_id] = { next_gtp_date: pending.due_date, gtp_overdue: days < 0 };
+            if (["live", "closing"].includes(c.stage)) {
+              const pending = (c.gtps ?? []).find((g) => ["pending", "rejected"].includes(g.status));
+              if (pending) {
+                const days = Math.ceil((new Date(pending.due_date) - new Date(today)) / 86400000);
+                gtpMap[aId] = { next_gtp_date: pending.due_date, gtp_overdue: days < 0 };
+              }
             }
           }
         }
@@ -368,12 +373,16 @@ export function useAsset(id) {
     queryFn: async () => {
       if (!id) return null;
       const asset = check(await supabase.from("assets").select("*").eq("id", id).single());
-      const [{ data: campaigns }, { data: audit }, { data: queueEntries }, docsMap] = await Promise.all([
-        supabase.from("campaigns").select("*").eq("asset_id", id).order("created_at", { ascending: false }),
+      const [{ data: allCampaigns }, { data: audit }, { data: queueEntries }, docsMap] = await Promise.all([
+        supabase.from("campaigns").select("*").order("created_at", { ascending: false }),
         supabase.from("audit_logs").select("*").eq("asset_id", id).order("created_at", { ascending: false }),
         supabase.from("queue_entries").select("*").eq("asset_id", id).order("created_at"),
         resolveDocumentUrls(asset.photo_ids ?? []),
       ]);
+
+      const campaigns = (allCampaigns ?? []).filter(
+        (c) => c.asset_id === id || (Array.isArray(c.extra_assets) && c.extra_assets.some((ea) => ea.id === id)),
+      );
 
       const docUrls = (asset.photo_ids ?? []).map((pId) => docsMap[pId]).filter(Boolean);
 
@@ -718,7 +727,7 @@ export function useBrand(id) {
       const assetIds = Array.from(
         new Set(
           [
-            ...(campaigns ?? []).map((c) => c.asset_id),
+            ...(campaigns ?? []).flatMap((c) => [c.asset_id, ...(Array.isArray(c.extra_assets) ? c.extra_assets.map((ea) => ea.id) : [])]),
             ...(queueEntries ?? []).map((q) => q.asset_id),
           ].filter(Boolean),
         ),
